@@ -1,0 +1,14 @@
+# Copy this file's rows into <install>/plugins/cordis.patch.yml to mount the
+# bundled sample plugin. It illustrates the plugin-directory contract: every
+# row here becomes an extra patch layer the launcher passes to `dsh web` as
+# --patch, so the plugin mounts on top of the shipped web composition without
+# rebuilding the engine.
+#
+# NOTE — module resolution: a row's `name` is resolved against the loader
+# baseline. For a plugin installed into the plugins/ directory the "resolve a
+# bare/relative name from plugins/" step is the module-fallback wiring this
+# packaging targets (see README, "What still needs verifying"). Until then, a
+# plugin whose package is installed into a node_modules the engine can see, or
+# named by an absolute path here, is the working form.
+- id: web-sample-plugin
+  name: '@dsh/web-sample-plugin'
