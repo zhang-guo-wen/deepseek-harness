@@ -1,6 +1,6 @@
 module dshwebtray
 
-go 1.26.4
+go 1.22
 
 require (
 	github.com/getlantern/context v0.0.0-20190109183933-c447772a6520 // indirect

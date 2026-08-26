@@ -387,11 +387,16 @@ class WindowsWebBuild {
   /** Build the native Go system-tray host into the install root. */
   async buildTrayHost(): Promise<void> {
     const product = join(STAGE, TRAY_EXE)
-    const srcDir = resolve(root, 'packaging/windows-web/tray-host')
     if (this.dryRun) {
       console.log(`build-windows-web: [dry-run] go build -ldflags "-H windowsgui" → ${product}`)
       return
     }
+    // Reuse a prebuilt tray host if present, so a later build needs no Go toolchain.
+    if (existsSync(product)) {
+      console.log(`build-windows-web: reusing prebuilt tray host ${product}`)
+      return
+    }
+    const srcDir = resolve(root, 'packaging/windows-web/tray-host')
     if (!existsSync(join(srcDir, 'go.mod'))) {
       throw new Error('build-windows-web: tray-host go.mod missing.')
     }

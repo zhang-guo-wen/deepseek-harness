@@ -1,0 +1,57 @@
+name: Build Windows Web Installer
+
+on:
+  push:
+    branches: [ master, main ]
+  workflow_dispatch:
+
+jobs:
+  build-installer:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download Node distribution to bundle
+        shell: pwsh
+        run: |
+          $nodeVer = "v22.19.0"
+          $zip = "$env:RUNNER_TEMP\node.zip"
+          Invoke-WebRequest "https://nodejs.org/dist/$nodeVer/node-$nodeVer-win-x64.zip" -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath "$env:RUNNER_TEMP\node-dist"
+          "NODE_DIR=$env:RUNNER_TEMP\node-dist\node-$nodeVer-win-x64" >> $env:GITHUB_ENV
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          pnpm exec tsx packaging/windows-web/build.ts --node-dir "$env:NODE_DIR" --iscc "$iscc"
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DeepSeek-Harness-Web-Installer
+          path: |
+            dist-windows-web/dsh-web-setup.exe
+            dist-windows-web/DeepSeek Harness.exe
+          if-no-files-found: error
