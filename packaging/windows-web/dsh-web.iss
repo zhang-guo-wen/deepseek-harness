@@ -10,7 +10,9 @@
 #define MyAppName "DeepSeek Harness Web"
 #define MyAppVersion "0.1.1"
 #define MyAppPublisher "DeepSeek AI"
-#define MyAppExeName "dsh-web.exe"
+; The system-tray host is the app users launch; the pkg launcher stays installed but secondary.
+#define MyAppExeName "DeepSeek Harness.exe"
+#define MyLauncherExeName "dsh-web.exe"
 
 ; The assembled install tree, relative to this .iss file (packaging/windows-web/).
 #define Stage "..\..\dist-windows-web"
@@ -36,8 +38,9 @@ ArchitecturesAllowed=x64compatible
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
-; The launcher exe at the install root.
-Source: "{#Stage}\dsh-web.exe"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
+; The system-tray host (primary app entry) and the pkg launcher (secondary).
+Source: "{#Stage}\DeepSeek Harness.exe"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
+Source: "{#Stage}\dsh-web.exe"; DestDir: "{app}"; DestName: "{#MyLauncherExeName}"; Flags: ignoreversion
 ; Bundled Node runtime.
 Source: "{#Stage}\node\*"; DestDir: "{app}\node"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; The web engine closure (host + client plugins, cordis, frontend dist).

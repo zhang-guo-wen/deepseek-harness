@@ -50,6 +50,8 @@ const LAUNCHER_SRC = 'packaging/windows-web/launcher.js'
 const ENGINE_DASH_BIN = 'lib/bin.js'
 /** Installer output name. */
 const SETUP_OUTPUT = 'dsh-web-setup.exe'
+/** The native system-tray host app entry. */
+const TRAY_EXE = 'DeepSeek Harness.exe'
 /** Pinned pkg spec for the thin launcher. */
 const PKG_SPEC = '@yao-pkg/pkg@6.21.0'
 
@@ -382,6 +384,26 @@ class WindowsWebBuild {
     }
   }
 
+  /** Build the native Go system-tray host into the install root. */
+  async buildTrayHost(): Promise<void> {
+    const product = join(STAGE, TRAY_EXE)
+    const srcDir = resolve(root, 'packaging/windows-web/tray-host')
+    if (this.dryRun) {
+      console.log(`build-windows-web: [dry-run] go build -ldflags "-H windowsgui" → ${product}`)
+      return
+    }
+    if (!existsSync(join(srcDir, 'go.mod'))) {
+      throw new Error('build-windows-web: tray-host go.mod missing.')
+    }
+    process.env.GOPROXY = process.env.GOPROXY || 'https://goproxy.cn,direct'
+    await this.run('build tray host', 'go', [
+      'build', '-C', srcDir, '-ldflags', '-H windowsgui', '-o', product, '.',
+    ])
+    if (!existsSync(product)) {
+      throw new Error(`build-windows-web: tray host ${product} missing after go build.`)
+    }
+  }
+
   /** Compile the installer when ISCC is available. */
   async compileInstaller(): Promise<void> {
     const iscc = this.cli.iscc
@@ -423,6 +445,7 @@ class WindowsWebBuild {
   private async copyForInstaller(shortStage: string): Promise<void> {
     await rm(shortStage, { recursive: true, force: true })
     await mkdir(shortStage, { recursive: true })
+    await cp(join(STAGE, TRAY_EXE), join(shortStage, TRAY_EXE))
     await cp(join(STAGE, 'dsh-web.exe'), join(shortStage, 'dsh-web.exe'))
     await cp(join(STAGE, NODE_SUBDIR), join(shortStage, NODE_SUBDIR), { recursive: true, dereference: true })
     await cp(join(STAGE, ENGINE_SUBDIR), join(shortStage, ENGINE_SUBDIR), { recursive: true, dereference: true })
@@ -430,7 +453,7 @@ class WindowsWebBuild {
 
   /** Print the assembled tree summary. */
   async printSummary(): Promise<void> {
-    const entries = ['dsh-web.exe', NODE_SUBDIR, ENGINE_SUBDIR, PLUGINS_SUBDIR, DATA_SUBDIR]
+    const entries = [TRAY_EXE, 'dsh-web.exe', NODE_SUBDIR, ENGINE_SUBDIR, PLUGINS_SUBDIR, DATA_SUBDIR]
     console.log('build-windows-web: install tree:')
     for (const name of entries) {
       const p = join(STAGE, name)
@@ -493,6 +516,7 @@ async function main(): Promise<void> {
   await pipeline.seedPlugins()
   await pipeline.seedDataDir()
   await pipeline.compileLauncher()
+  await pipeline.buildTrayHost()
   await pipeline.compileInstaller()
   await pipeline.printSummary()
 }

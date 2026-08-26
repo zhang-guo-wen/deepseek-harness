@@ -3,9 +3,11 @@
 This directory packages `dsh web` (the browser GUI) as a Windows installer. The
 result is a per-user install:
 
-1. A launcher exe (`dsh-web.exe`) you double-click.
-2. The launcher boots the web engine, serves the frontend dist, and opens your
-   default browser at `http://127.0.0.1:3080`.
+1. A native system-tray host (`DshWebTray.exe`) you double-click / launch from the
+   tray. It spawns the web engine, listens in the tray ("打开页面" / "退出"), and
+   opens your default browser automatically on first launch.
+2. The host boots the web engine, serves the frontend dist, and shows the page in
+   a tray icon; the port is a random OS-assigned one (no 3080 collision).
 3. The install directory has a `plugins/` folder; plugins added there are loaded
    without rebuilding the engine.
 
@@ -13,19 +15,21 @@ result is a per-user install:
 
 ```
 dist-windows-web/
-  dsh-web.exe            thin pkg-compiled launcher
+  DshWebTray.exe         native (Go) system-tray host — the app entry
+  dsh-web.exe            thin pkg-compiled launcher (secondary, no tray)
   node/
-  engine/                the web engine closure (@deepseek-ai/dsh-cli deploy)
+  engine/                the web engine closure (@deepseek-ai/dsh deploy)
   plugins/               ★ user plugin directory (+ cordis.patch.yml layer)
   data/                  writable DSH home (profiles, storage, credentials)
 dsh-web-setup.exe        ← build --iscc compiles this from the above
 ```
 
-The launcher reuses the existing `dsh web` surface end to end: it spawns
-`node <install>/node/node.exe <install>/engine/node_modules/@deepseek-ai/dsh-cli/lib/bin.js web --patch <install>/plugins/cordis.patch.yml`.
-The web profile composes `dsh-base` + `dsh-web-app`, serves the built frontend
-dist, and opens the browser. The plugin directory is just an extra `--patch`
-layer, so it rides the shipped composition without changes to the engine.
+The tray host reuses the existing `dsh web` surface end to end: it spawns
+`node <install>/node/node.exe <install>/engine/lib/bin.js web --patch <install>/plugins/cordis.patch.yml --port 0 --no-open`,
+reads the printed URL to learn the actual port, and shows a tray icon with
+"打开页面" / "退出". The web profile composes `dsh-base` + `dsh-web-app`, serves
+the built frontend dist; the plugin directory is just an extra `--patch` layer,
+so it rides the shipped composition without changes to the engine.
 
 ## Prerequisites (on the build machine)
 
