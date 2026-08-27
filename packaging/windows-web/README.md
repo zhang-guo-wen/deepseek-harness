@@ -35,6 +35,18 @@ reads the printed URL to learn the actual port, and shows a tray icon with
 the built frontend dist; the plugin directory is just an extra `--patch` layer,
 so it rides the shipped composition without changes to the engine.
 
+### Harness guardian
+
+The tray host is a guardian for the harness server process. If the child exits
+abnormally (it crashes, is killed, or otherwise dies before an explicit quit),
+the tray restarts it automatically with a short delay. After too many crashes
+in a 30 s window (5 by default) the reboot is dropped and the reason is
+surfaced via the tray status item, the tooltip, and the log file. Choosing
+"退出" sets the stopping flag so a quit is never followed by a restart. The
+harness `stderr` is now written to `<DSH_HOME>\harness.log` (the tray app has no
+console) so a crash's cause is diagnosable even when only a status item is
+shown.
+
 ## Prerequisites (on the build machine)
 
 - Node `^22.19 || >=24` and pnpm (`pnpm@11.7.0`).
