@@ -27,7 +27,10 @@ AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 ; Per-user install: no admin needed; the writable DSH_HOME (install\data) stays writable.
 PrivilegesRequired=lowest
-DefaultDirName={localappdata}\Programs\DeepSeekHarness
+; Install to C:\DeepSeekHarness: the engine's @mistralai SDK has ~229-char file
+; paths, and a deeper prefix (e.g. %LOCALAPPDATA%\Programs\...) pushes the full
+; path past Inno's 260-char MAX_PATH. C:\DeepSeekHarness keeps it at 254.
+DefaultDirName=C:\DeepSeekHarness
 ; Don't reuse a previous install directory: a stale user-chosen path (e.g. a
 ; root-level test install) would otherwise override DefaultDirName on upgrade.
 UsePreviousAppDir=no
