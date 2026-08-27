@@ -42,7 +42,7 @@ const NODE_SUBDIR = 'node'
 /** The dsh bin inside the deployed engine (the deploy root is the app package). */
 const ENGINE_DASH_BIN = 'lib/bin.js'
 /** Installer output name. */
-const SETUP_OUTPUT = 'dsh-web-setup.exe'
+const SETUP_OUTPUT = 'DeepSeekHarnessSetup.exe'
 /** The native system-tray host app entry. */
 const TRAY_EXE = 'DeepSeek Harness.exe'
 

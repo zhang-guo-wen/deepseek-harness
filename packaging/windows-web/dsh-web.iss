@@ -27,10 +27,10 @@ AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 ; Per-user install: no admin needed; the writable DSH_HOME (install\data) stays writable.
 PrivilegesRequired=lowest
-DefaultDirName={localappdata}\Programs\DeepSeek Harness
+DefaultDirName={localappdata}\Programs\DeepSeekHarness
 DisableProgramGroupPage=yes
 OutputDir={#Stage}
-OutputBaseFilename=dsh-web-setup
+OutputBaseFilename=DeepSeekHarnessSetup
 UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma2/max
 SolidCompression=yes

@@ -21,7 +21,7 @@ dist-windows-web/
   engine/                the web engine closure (@deepseek-ai/dsh deploy)
                          (node_modules/…: host + client plugins, cordis,
                           dsh-base, dsh-web-app, web-frontend dist)
-dsh-web-setup.exe        ← build --iscc compiles this from the above
+DeepSeekHarnessSetup.exe        ← build --iscc compiles this from the above
 ```
 
 The tray host reuses the existing `dsh web` surface end to end: it spawns
@@ -94,7 +94,7 @@ pnpm exec tsx packaging/windows-web/build.ts --node-dir <node-dist> --iscc <ISCC
   reusing a prebuilt `DeepSeek Harness.exe` (needed after editing
   `tray-host/main.go`, because a stale prebuilt would otherwise mask the change).
 - Without `--iscc`, you get the `dist-windows-web/` tree; run Inno Setup on
-  `packaging/windows-web/dsh-web.iss` to compile `dsh-web-setup.exe`.
+  `packaging/windows-web/dsh-web.iss` to compile `DeepSeekHarnessSetup.exe`.
 
 ## Run
 
@@ -117,7 +117,7 @@ Built and exercised end to end on a real Windows host with this scaffold:
   `__DSH_BOOT__`).
 - **Installer** — `pnpm run build && pnpm run build:web` then
   `pnpm exec tsx packaging/windows-web/build.ts --node-dir <node> --iscc <ISCC.exe>`
-  produces `dist-windows-web\dsh-web-setup.exe`.
+  produces `dist-windows-web\DeepSeekHarnessSetup.exe`.
 
 ### Why the installer compiles from a short path
 
@@ -125,7 +125,7 @@ Inno Setup 6 cannot read source paths approaching MAX_PATH, and the web
 engine's deep dependency tree (`pi-ai` → `mistralai`, ~253 chars at a normal
 checkout path) hits that. `build.ts` copies the install tree to
 `C:\dshw-bundle` (short) and compiles a temporary .iss there, then moves
-`dsh-web-setup.exe` back into `dist-windows-web/`. This makes `--iscc` work
+`DeepSeekHarnessSetup.exe` back into `dist-windows-web/`. This makes `--iscc` work
 from any checkout, and is why a long repo path does not break the build.
 
 ## Remaining follow-ups

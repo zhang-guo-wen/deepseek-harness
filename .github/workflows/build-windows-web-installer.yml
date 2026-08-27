@@ -52,6 +52,6 @@ jobs:
         with:
           name: DeepSeek-Harness-Web-Installer
           path: |
-            dist-windows-web/dsh-web-setup.exe
+            dist-windows-web/DeepSeekHarnessSetup.exe
             dist-windows-web/DeepSeek Harness.exe
           if-no-files-found: error
