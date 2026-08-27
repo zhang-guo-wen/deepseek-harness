@@ -9,8 +9,8 @@ result is a per-user install with a single native tray-host entry point:
 2. The host boots the web engine, serves the frontend dist, and shows the page in
    a tray icon; the port is a random OS-assigned one (no 3080 collision).
 3. Plugin loading uses the harness's own default mechanism: **DSH_HOME is the
-   install-local `data` home**, and the `web` profile's own `cordis.patch.yml`
-   mounts the plugins installed there. There is no separate `plugins/` directory.
+   user's `~/.dsh`**, and the `web` profile's own `cordis.patch.yml` mounts the
+   plugins installed there. There is no separate `plugins/` directory.
 
 ## What the build produces
 
@@ -31,14 +31,14 @@ reads the printed URL to learn the actual port, and shows a tray icon with
 serves the built frontend dist. No `--patch` is passed, so plugin mounting rides
 the `web` profile's own `cordis.patch.yml` — the harness's default load path.
 
-### DSH_HOME is install-local and self-contained
+### DSH_HOME is the user's default home
 
-DSH_HOME is the install-local `data` directory (`<install>\data`). On first
-launch the harness heals the engine's full set of built-in packages into it
-(via its module-fallback mechanism), so the install boots reproducibly without
-depending on the user's `~/.dsh`. Plugins are installed into this home's `web`
-profile node_modules. It stays self-contained: the install tree does not read
-or modify the source-build `~/.dsh`.
+DSH_HOME is the user's default Harness home (`~/.dsh`, `%USERPROFILE%\.dsh` on
+Windows), shared with a source-build `dsh`. Plugins installed through the
+official `dsh plugin` path land in this home's `web` profile node_modules and
+are mounted by its `cordis.patch.yml`; sessions, settings, and credentials live
+there too. On first launch the harness heals the engine's built-in packages
+into the home's module fallback as usual.
 
 ### Harness guardian
 
@@ -58,11 +58,11 @@ When the harness repeatedly fails to start (crashes more than 5 times in a 30 s
 window — often because an installed plugin throws at load), the tray host pops a
 Windows dialog asking whether to enter "纯净启动". On **yes**, it boots the
 harness against a **temporary empty DSH_HOME** (`<install>\clean-data`) instead of
-the normal `<install>\data` home. That home's `web` profile is never seeded with
+the normal `~/.dsh` home. That home's `web` profile is never seeded with
 plugins, so no user plugin is loaded at all — isolating whether a crash was
 caused by an installed plugin while keeping the core `dsh-base` +
 `dsh-web-app` composition. On **no**, the tray stops restarting and exits the
-guardian. The normal `<install>\data` home is never modified, so clean start is
+guardian. The normal `~/.dsh` home is never modified, so clean start is
 fully reversible (close the tray and relaunch to return to your normal home).
 
 > The harness child process is spawned with `CREATE_NO_WINDOW`, so no console
@@ -100,7 +100,7 @@ pnpm exec tsx packaging/windows-web/build.ts --node-dir <node-dist> --iscc <ISCC
 ## Run
 
 Double-click `DeepSeek Harness.exe` (already-installed: the Start menu / desktop
-shortcut). It uses the install-local `data` home, boots the `web` profile with
+shortcut). It uses the user's default `~/.dsh` home, boots the `web` profile with
 its plugins mounted, and opens the browser. The tray menu offers "打开页面" /
 "纯净启动" / "退出".
 
@@ -143,6 +143,6 @@ in the child, so assert with a tool or host signal rather than a console.log).
   the Python SDK exe (the web GUI is the full product).
 
 These gaps are the reason this is a scaffold rather than a shipped artifact: the
-pipeline and the self-contained DSH_HOME/plugin contract are in place; the
+pipeline and the shared DSH_HOME/plugin contract are in place; the
 remaining work is Windows-specific verification and the plugin resolution of the
-install-local `data` home.
+default `~/.dsh` home.

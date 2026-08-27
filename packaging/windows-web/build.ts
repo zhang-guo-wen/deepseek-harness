@@ -11,8 +11,8 @@
  *       node_modules/...     host + client plugins, cordis, dsh-base, dsh-web-app, web-frontend dist
  *
  * The tray host owns the runtime semantics, not this script:
- *   - it sets `DSH_HOME` to the install-local `data` home (and a temp `clean-data`
- *     home for clean start) and `DSH_CWD` to the working dir,
+ *   - it sets `DSH_HOME` to the user's `~/.dsh` (and a temp install-local
+ *     `clean-data` home for clean start) and `DSH_CWD` to the working dir,
  *   - it boots `dsh web` with no `--patch` (plugin mounting rides the web
  *     profile's own cordis.patch.yml, the harness's default mechanism),
  *   - the engine resolves the web composition, serves the frontend dist, and
