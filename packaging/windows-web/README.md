@@ -47,6 +47,19 @@ harness `stderr` is now written to `<DSH_HOME>\harness.log` (the tray app has no
 console) so a crash's cause is diagnosable even when only a status item is
 shown.
 
+### "纯净启动" (clean start) in the tray menu
+
+A tray checkbox "纯净启动" toggles whether the harness is started without any
+user-installed plugin. When enabled, the tray host passes the empty patch layer
+`<install>\plugins\clean.patch.yml` (content `[]`) instead of the user's
+`plugins\cordis.patch.yml`, so no external plugin is mounted. The user's
+`cordis.patch.yml` is never modified, so the toggle is fully reversible. Since
+`--patch` is a boot-time argument, toggling the checkbox while the harness is
+running restarts it; the toggle resets the crash counter so a manual switch is
+never counted as a crash. Handy for diagnosing whether a crashed or
+misbehaving harness was caused by an installed plugin (clean start keeps the
+core `dsh-base` + `dsh-web-app` composition).
+
 ## Prerequisites (on the build machine)
 
 - Node `^22.19 || >=24` and pnpm (`pnpm@11.7.0`).

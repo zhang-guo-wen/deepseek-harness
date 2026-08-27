@@ -40,6 +40,9 @@ var (
 	child       *exec.Cmd
 	// stopping 在用户主动点"退出"时置 true；之后守护不再拉起 harness。
 	stopping bool
+	// cleanStart 为 true 时以"纯净启动"运行：用空插件层（clean.patch.yml），
+	// 不挂载任何用户插件，用于诊断插件导致的崩溃。
+	cleanStart bool
 	// restartTimes 记录最近崩溃重启的时间戳，用于防止无限快速重启。
 	restartTimes []time.Time
 )
@@ -51,6 +54,8 @@ const (
 	restartWindow = 30 * time.Second
 	// crashDelay 是连续两次拉起之间的间隔，避免瞬间反复重启。
 	crashDelay = 2 * time.Second
+	// cleanPatchFile 是纯净启动用的空插件层文件名（内容为 []）。
+	cleanPatchFile = "clean.patch.yml"
 )
 
 func main() {
@@ -63,6 +68,7 @@ type harnessPaths struct {
 	nodeBin     string
 	engineBin   string
 	pluginPatch string
+	cleanPatch  string
 	logFile     string
 }
 
@@ -78,6 +84,7 @@ func onReady() {
 		nodeBin:     filepath.Join(install, "node", "node.exe"),
 		engineBin:   filepath.Join(install, "engine", "lib", "bin.js"),
 		pluginPatch: filepath.Join(install, "plugins", "cordis.patch.yml"),
+		cleanPatch:  filepath.Join(install, "plugins", cleanPatchFile),
 		logFile:     filepath.Join(dataDir, "harness.log"),
 	}
 	// A missing `--patch` file is a hard boot error; seed an empty list on first run.
@@ -85,10 +92,16 @@ func onReady() {
 	if !fileExists(paths.pluginPatch) {
 		_ = os.WriteFile(paths.pluginPatch, []byte("# plugins/cordis.patch.yml — the launcher passes this to `dsh web` as --patch.\n[]\n"), 0o644)
 	}
+	// Seed the clean (empty) plugin layer used by "纯净启动"; it never changes
+	// the user's own cordis.patch.yml, so toggling is fully reversible.
+	if !fileExists(paths.cleanPatch) {
+		_ = os.WriteFile(paths.cleanPatch, []byte("# clean.patch.yml — empty plugin layer for 纯净启动.\n[]\n"), 0o644)
+	}
 
 	systray.SetIcon(trayIcon)
 	systray.SetTooltip("DeepSeek Harness Web")
 	statusItem := systray.AddMenuItem("harness 运行中", "DeepSeek Harness 状态")
+	cleanItem := systray.AddMenuItemCheckbox("纯净启动", "重启 harness，不挂载任何已安装插件（诊断插件导致的崩溃）", false)
 	openItem := systray.AddMenuItem("打开页面", "在默认浏览器中打开")
 	systray.AddSeparator()
 	exitItem := systray.AddMenuItem("退出", "退出 DeepSeek Harness")
@@ -97,6 +110,23 @@ func onReady() {
 	if fileExists(paths.nodeBin) && fileExists(paths.engineBin) {
 		go monitorLoop(paths, statusItem)
 	}
+
+	// "纯净启动"切换：翻转 cleanStart；若 harness 在跑，重启它以应用新插件层
+	// （--patch 是启动参数，改后需重启才生效）。用户主动操作不计数为崩溃。
+	// 状态项标题由 monitorLoop 统一更新，这里只改标志 + 触发重启。
+	go func() {
+		for range cleanItem.ClickedCh {
+			mu.Lock()
+			cleanStart = cleanItem.Checked()
+			// 用户主动切换：重置崩溃统计，避免之前的崩溃计数导致误判暂停。
+			restartTimes = nil
+			c := child
+			if !stopping && c != nil && c.Process != nil {
+				_ = c.Process.Kill()
+			}
+			mu.Unlock()
+		}
+	}()
 
 	go func() {
 		for {
@@ -120,6 +150,15 @@ func onReady() {
 // 崩溃超过阈值。每次崩溃后按 crashDelay 隔开，避免瞬间反复重启。
 func monitorLoop(paths harnessPaths, statusItem *systray.MenuItem) {
 	for {
+		// 每次拉起前反映当前运行模式。
+		mu.Lock()
+		clean := cleanStart
+		mu.Unlock()
+		if clean {
+			statusItem.SetTitle("harness 运行中（纯净启动）")
+		} else {
+			statusItem.SetTitle("harness 运行中")
+		}
 		quit := launchOnce(paths, statusItem)
 		if quit {
 			return // 用户主动退出，不再拉起
@@ -144,7 +183,15 @@ func launchOnce(paths harnessPaths, statusItem *systray.MenuItem) bool {
 	dataDir := readConfigHome(paths.install)
 	_ = os.MkdirAll(dataDir, 0o755)
 
-	cmd := exec.Command(paths.nodeBin, paths.engineBin, "web", "--patch", paths.pluginPatch, "--port", "0", "--no-open")
+	// 纯净启动用空插件层（clean.patch.yml），否则用用户插件层。读取时持锁。
+	mu.Lock()
+	patch := paths.pluginPatch
+	if cleanStart {
+		patch = paths.cleanPatch
+	}
+	mu.Unlock()
+
+	cmd := exec.Command(paths.nodeBin, paths.engineBin, "web", "--patch", patch, "--port", "0", "--no-open")
 	cmd.Env = append(os.Environ(), "DSH_HOME="+dataDir, "DSH_CWD="+filepath.Dir(paths.nodeBin))
 
 	// 把 harness 的 stderr 落盘（托盘程序无控制台，丢弃会掩盖崩溃原因）。
