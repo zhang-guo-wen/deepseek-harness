@@ -1,8 +1,0 @@
-{
-  "name": "@dsh/web-sample-plugin",
-  "version": "0.0.1",
-  "private": true,
-  "type": "module",
-  "main": "index.js",
-  "description": "Minimal DeepSeek Harness Web plugin illustrating the plugins/ directory contract."
-}

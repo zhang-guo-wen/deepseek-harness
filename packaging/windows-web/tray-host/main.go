@@ -2,7 +2,7 @@
 //
 // This is a small native (pure-Go, no console) executable that:
 //   - spawns the bundled harness server (`node <install>\node\node.exe <install>\engine\lib\bin.js
-//     web --patch <install>\plugins\cordis.patch.yml --port 0 --no-open`),
+//     web --port 0 --no-open`),
 //   - reads the server's stdout to learn the actual random port,
 //   - shows a system-tray icon with "打开页面" (open the default browser) and "退出",
 //   - opens the page automatically on first successful launch,
@@ -10,6 +10,13 @@
 //     restarted automatically; after too many crashes within a short window the
 //     reboot is dropped and the reason is surfaced through a tray status item,
 //     the tooltip, and a log file (the tray has no console).
+//
+// Plugin loading uses the harness's own default mechanism: the DSH_HOME is the
+// user's `~/.dsh`, and the `web` profile's own `cordis.patch.yml` mounts the
+// user's plugins. There is no separate `plugins/` directory or junction; a
+// "纯净启动" toggle instead boots the harness against a temporary empty
+// DSH_HOME (`<install>\clean-data`) whose `web` profile is never seeded with
+// plugins, so no user plugin is loaded at all.
 //
 // Built with `go build -ldflags "-H windowsgui"` so it runs without a console.
 package main
@@ -23,8 +30,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
-	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/getlantern/systray"
@@ -40,8 +47,8 @@ var (
 	child       *exec.Cmd
 	// stopping 在用户主动点"退出"时置 true；之后守护不再拉起 harness。
 	stopping bool
-	// cleanStart 为 true 时以"纯净启动"运行：用空插件层（clean.patch.yml），
-	// 不挂载任何用户插件，用于诊断插件导致的崩溃。
+	// cleanStart 为 true 时以"纯净启动"运行：用临时空 DSH_HOME 启动，
+	// 不加载任何用户插件，用于诊断插件导致的崩溃。
 	cleanStart bool
 	// restartTimes 记录最近崩溃重启的时间戳，用于防止无限快速重启。
 	restartTimes []time.Time
@@ -54,8 +61,8 @@ const (
 	restartWindow = 30 * time.Second
 	// crashDelay 是连续两次拉起之间的间隔，避免瞬间反复重启。
 	crashDelay = 2 * time.Second
-	// cleanPatchFile 是纯净启动用的空插件层文件名（内容为 []）。
-	cleanPatchFile = "clean.patch.yml"
+	// cleanHomeSubdir 是纯净启动用的临时 DSH_HOME 目录名（<install>\<name>）。
+	cleanHomeSubdir = "clean-data"
 )
 
 func main() {
@@ -64,12 +71,11 @@ func main() {
 
 // harnessPaths 是一次启动所需的所有路径，保持 monitorLoop 自包含。
 type harnessPaths struct {
-	install     string
-	nodeBin     string
-	engineBin   string
-	pluginPatch string
-	cleanPatch  string
-	logFile     string
+	install   string
+	nodeBin   string
+	engineBin string
+	userHome  string
+	cleanHome string
 }
 
 func onReady() {
@@ -78,30 +84,21 @@ func onReady() {
 		return
 	}
 	install := filepath.Dir(exe)
-	dataDir := readConfigHome(install)
 	paths := harnessPaths{
-		install:     install,
-		nodeBin:     filepath.Join(install, "node", "node.exe"),
-		engineBin:   filepath.Join(install, "engine", "lib", "bin.js"),
-		pluginPatch: filepath.Join(install, "plugins", "cordis.patch.yml"),
-		cleanPatch:  filepath.Join(install, "plugins", cleanPatchFile),
-		logFile:     filepath.Join(dataDir, "harness.log"),
+		install:   install,
+		nodeBin:   filepath.Join(install, "node", "node.exe"),
+		engineBin: filepath.Join(install, "engine", "lib", "bin.js"),
+		userHome:  userDshHome(),
+		cleanHome: filepath.Join(install, cleanHomeSubdir),
 	}
-	// A missing `--patch` file is a hard boot error; seed an empty list on first run.
-	_ = os.MkdirAll(filepath.Dir(paths.pluginPatch), 0o755)
-	if !fileExists(paths.pluginPatch) {
-		_ = os.WriteFile(paths.pluginPatch, []byte("# plugins/cordis.patch.yml — the launcher passes this to `dsh web` as --patch.\n[]\n"), 0o644)
-	}
-	// Seed the clean (empty) plugin layer used by "纯净启动"; it never changes
-	// the user's own cordis.patch.yml, so toggling is fully reversible.
-	if !fileExists(paths.cleanPatch) {
-		_ = os.WriteFile(paths.cleanPatch, []byte("# clean.patch.yml — empty plugin layer for 纯净启动.\n[]\n"), 0o644)
-	}
+	// 确保正常 DSH_HOME 的 web profile 目录存在，首次运行 harness 会自动初始化。
+	_ = os.MkdirAll(filepath.Join(paths.userHome, "profiles", "web"), 0o755)
+	_ = os.MkdirAll(paths.cleanHome, 0o755)
 
 	systray.SetIcon(trayIcon)
 	systray.SetTooltip("DeepSeek Harness Web")
 	statusItem := systray.AddMenuItem("harness 运行中", "DeepSeek Harness 状态")
-	cleanItem := systray.AddMenuItemCheckbox("纯净启动", "重启 harness，不挂载任何已安装插件（诊断插件导致的崩溃）", false)
+	cleanItem := systray.AddMenuItemCheckbox("纯净启动", "重启 harness，用空白数据目录启动（不加载任何已安装插件，诊断插件导致的崩溃）", false)
 	openItem := systray.AddMenuItem("打开页面", "在默认浏览器中打开")
 	systray.AddSeparator()
 	exitItem := systray.AddMenuItem("退出", "退出 DeepSeek Harness")
@@ -111,14 +108,12 @@ func onReady() {
 		go monitorLoop(paths, statusItem)
 	}
 
-	// "纯净启动"切换：翻转 cleanStart；若 harness 在跑，重启它以应用新插件层
-	// （--patch 是启动参数，改后需重启才生效）。用户主动操作不计数为崩溃。
-	// 状态项标题由 monitorLoop 统一更新，这里只改标志 + 触发重启。
+	// "纯净启动"切换：翻转 cleanStart；若 harness 在跑，重启它以应用新的
+	// DSH_HOME。用户主动操作不计数为崩溃（重置崩溃统计）。
 	go func() {
 		for range cleanItem.ClickedCh {
 			mu.Lock()
 			cleanStart = cleanItem.Checked()
-			// 用户主动切换：重置崩溃统计，避免之前的崩溃计数导致误判暂停。
 			restartTimes = nil
 			c := child
 			if !stopping && c != nil && c.Process != nil {
@@ -166,7 +161,7 @@ func monitorLoop(paths harnessPaths, statusItem *systray.MenuItem) {
 		// 子进程异常退出：检查是否已连续崩溃过多。
 		if overRestartBudget() {
 			statusItem.SetTitle("harness 已暂停重启")
-			tip := "harness 连续崩溃，已暂停自动重启。请查看日志：" + paths.logFile
+			tip := "harness 连续崩溃，已暂停自动重启。请查看日志：" + logPathOf(paths)
 			systray.SetTooltip(tip)
 			statusItem.SetTooltip(tip)
 			return
@@ -177,25 +172,39 @@ func monitorLoop(paths harnessPaths, statusItem *systray.MenuItem) {
 	}
 }
 
+// logPathOf 返回当前 DSH_HOME 下的 harness 日志路径（跟随正常/纯净启动）。
+func logPathOf(paths harnessPaths) string {
+	return filepath.Join(currentHome(paths), "harness.log")
+}
+
+// currentHome 返回当前生效的 DSH_HOME（正常为用户 ~/.dsh，纯净为安装目录 clean-data）。
+func currentHome(paths harnessPaths) string {
+	mu.Lock()
+	defer mu.Unlock()
+	if cleanStart {
+		return paths.cleanHome
+	}
+	return paths.userHome
+}
+
 // launchOnce 启动一次 harness 子进程并阻塞到它退出。返回是否用户主动退出
 // （此时不该再拉起）。stdout 用于学习端口；stderr 落盘到日志文件供诊断。
+// 启动命令不传 --patch：插件的挂载由所选 DSH_HOME 的 web profile 自身的
+// cordis.patch.yml 负责（系统默认插件加载机制）。
 func launchOnce(paths harnessPaths, statusItem *systray.MenuItem) bool {
-	dataDir := readConfigHome(paths.install)
-	_ = os.MkdirAll(dataDir, 0o755)
+	home := currentHome(paths)
+	_ = os.MkdirAll(home, 0o755)
+	logFile := filepath.Join(home, "harness.log")
 
-	// 纯净启动用空插件层（clean.patch.yml），否则用用户插件层。读取时持锁。
-	mu.Lock()
-	patch := paths.pluginPatch
-	if cleanStart {
-		patch = paths.cleanPatch
-	}
-	mu.Unlock()
-
-	cmd := exec.Command(paths.nodeBin, paths.engineBin, "web", "--patch", patch, "--port", "0", "--no-open")
-	cmd.Env = append(os.Environ(), "DSH_HOME="+dataDir, "DSH_CWD="+filepath.Dir(paths.nodeBin))
+	cmd := exec.Command(paths.nodeBin, paths.engineBin, "web", "--port", "0", "--no-open")
+	cmd.Env = append(os.Environ(), "DSH_HOME="+home, "DSH_CWD="+filepath.Dir(paths.nodeBin))
+	// GUI 宿主（-H windowsgui，无控制台）spawn 一个 console 子系统的 node.exe，
+	// 默认会让 Windows 给子进程新建一个控制台窗口（用户看到"一直弹出的终端"）。
+	// CREATE_NO_WINDOW 抑制该窗口；harness 的 stdout/stderr 走 pipe/日志，无需控制台。
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000} // CREATE_NO_WINDOW
 
 	// 把 harness 的 stderr 落盘（托盘程序无控制台，丢弃会掩盖崩溃原因）。
-	logHandle, err := os.OpenFile(paths.logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	logHandle, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		logHandle = nil // 日志不可写不阻塞启动
 	}
@@ -310,24 +319,12 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
-// readConfigHome 读取安装器写入的 <install>/dsh-config.txt 里的 DSH_HOME。
-// 文件缺失、不可读或值为空时回退到自包含的 <install>/data。
-func readConfigHome(install string) string {
-	configPath := filepath.Join(install, "dsh-config.txt")
-	raw, err := os.ReadFile(configPath)
-	if err != nil {
-		return filepath.Join(install, "data")
+// userDshHome 返回用户的 DSH 家目录（~/.dsh）。Windows 上用 %USERPROFILE%。
+func userDshHome() string {
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return filepath.Join(home, ".dsh")
 	}
-	for _, line := range strings.Split(string(raw), "\n") {
-		line = strings.TrimRight(line, "\r")
-		key, value, ok := strings.Cut(line, "=")
-		if ok && strings.TrimSpace(key) == "DSH_HOME" {
-			if home := strings.TrimSpace(value); home != "" {
-				return home
-			}
-		}
-	}
-	return filepath.Join(install, "data")
+	return ".dsh"
 }
 
 // pruneOldRestarts 丢弃窗口外的崩溃记录，使计数只反映最近 restartWindow。

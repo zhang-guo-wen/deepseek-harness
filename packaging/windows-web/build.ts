@@ -5,17 +5,16 @@
  * installer (`dsh-web.iss`) compiles into a setup .exe:
  *
  *   dist-windows-web/
- *     dsh-web.exe            thin pkg-compiled launcher (spawns the installed dsh web)
+ *     DeepSeek Harness.exe  native (Go) system-tray host — the app entry
  *     node/                  bundled Node runtime (the user needs no Node install)
- *     engine/                the web engine closure (`@deepseek-ai/dsh-cli` deploy)
+ *     engine/                the web engine closure (`@deepseek-ai/dsh` deploy)
  *       node_modules/...     host + client plugins, cordis, dsh-base, dsh-web-app, web-frontend dist
- *     plugins/               ★ user plugin directory (empty by default)
- *       cordis.patch.yml     the extra patch layer the launcher passes as `--patch`
- *     data/                  writable DSH home (profiles, storage, credentials), created on first run
  *
- * The launcher owns the runtime semantics, not this script:
- *   - it sets `DSH_HOME` to `<install>/data` and `DSH_CWD` to the working dir,
- *   - it boots `dsh web` with `--patch <install>/plugins/cordis.patch.yml`,
+ * The tray host owns the runtime semantics, not this script:
+ *   - it sets `DSH_HOME` to the user's `~/.dsh` (and a temp `clean-data` home for
+ *     clean start) and `DSH_CWD` to the working dir,
+ *   - it boots `dsh web` with no `--patch` (plugin mounting rides the web
+ *     profile's own cordis.patch.yml, the harness's default mechanism),
  *   - the engine resolves the web composition, serves the frontend dist, and
  *     opens the default browser.
  *
@@ -40,20 +39,12 @@ const OUT_DIR = 'dist-windows-web'
 const ENGINE_SUBDIR = 'engine'
 /** Bundled Node runtime directory inside the install tree. */
 const NODE_SUBDIR = 'node'
-/** User plugin directory inside the install tree. */
-const PLUGINS_SUBDIR = 'plugins'
-/** Writable DSH home directory, created on first launch. */
-const DATA_SUBDIR = 'data'
-/** The launcher source pkg compiles into dsh-web.exe. */
-const LAUNCHER_SRC = 'packaging/windows-web/launcher.js'
 /** The dsh bin inside the deployed engine (the deploy root is the app package). */
 const ENGINE_DASH_BIN = 'lib/bin.js'
 /** Installer output name. */
 const SETUP_OUTPUT = 'dsh-web-setup.exe'
 /** The native system-tray host app entry. */
 const TRAY_EXE = 'DeepSeek Harness.exe'
-/** Pinned pkg spec for the thin launcher. */
-const PKG_SPEC = '@yao-pkg/pkg@6.21.0'
 
 /** Staged install root. */
 const STAGE = resolve(root, OUT_DIR)
@@ -129,7 +120,7 @@ class BuildCli {
       '  --dry-run            print every command and filesystem change without executing.',
       '  --help               print this help.',
       '',
-      `Assembles the install tree in ${STAGE}; the launcher is compiled with ${PKG_SPEC}.`,
+      `Assembles the install tree in ${STAGE}; the tray host is built with Go.`,
       `The engine closure is ${DEPLOY_ROOT_PACKAGE}'s production dependency tree (${ENGINE_SUBDIR}/).`,
     ].join('\n')
   }
@@ -343,52 +334,6 @@ class WindowsWebBuild {
     else await cp(nodeDir, target, { recursive: true, dereference: true, filter: p => basename(p) !== 'node_modules' })
   }
 
-  /** Seed the plugin directory and its empty patch layer. */
-  async seedPlugins(): Promise<void> {
-    const plugins = join(STAGE, PLUGINS_SUBDIR)
-    if (this.dryRun) {
-      console.log(`build-windows-web: [dry-run] mkdir -p ${plugins}`)
-      console.log(`build-windows-web: [dry-run] write ${join(plugins, 'cordis.patch.yml')}`)
-      return
-    }
-    await mkdir(plugins, { recursive: true })
-    await writeFile(
-      join(plugins, 'cordis.patch.yml'),
-      '# plugins/cordis.patch.yml — the launcher passes this to `dsh web` as --patch.\n'
-        + '# Add loader patch rows below (id-targeted config overrides, disables, insert lists).\n'
-        + '[]\n',
-      'utf8',
-    )
-  }
-
-  /** Create the writable data home directory (DSH_HOME) the launcher uses. */
-  async seedDataDir(): Promise<void> {
-    const data = join(STAGE, DATA_SUBDIR)
-    if (this.dryRun) {
-      console.log(`build-windows-web: [dry-run] mkdir -p ${data}`)
-      return
-    }
-    await mkdir(data, { recursive: true })
-  }
-
-  /** Compile the thin launcher into `dsh-web.exe`. */
-  async compileLauncher(): Promise<void> {
-    const product = join(STAGE, 'dsh-web.exe')
-    if (this.dryRun) {
-      console.log(`build-windows-web: [dry-run] pkg ${LAUNCHER_SRC} → ${product}`)
-      return
-    }
-    await this.run('pkg launcher', pnpmBin(), [
-      'dlx', PKG_SPEC,
-      resolve(root, LAUNCHER_SRC),
-      '--targets', 'node24-win32-x64',
-      '--output', product,
-    ])
-    if (!existsSync(product)) {
-      throw new Error(`build-windows-web: launcher ${product} is missing after the pkg run.`)
-    }
-  }
-
   /** Build the native Go system-tray host into the install root. */
   async buildTrayHost(): Promise<void> {
     const product = join(STAGE, TRAY_EXE)
@@ -464,7 +409,6 @@ class WindowsWebBuild {
     await rm(shortStage, { recursive: true, force: true })
     await mkdir(shortStage, { recursive: true })
     await cp(join(STAGE, TRAY_EXE), join(shortStage, TRAY_EXE))
-    await cp(join(STAGE, 'dsh-web.exe'), join(shortStage, 'dsh-web.exe'))
     await cp(join(STAGE, NODE_SUBDIR), join(shortStage, NODE_SUBDIR), { recursive: true, dereference: true })
     await cp(join(STAGE, ENGINE_SUBDIR), join(shortStage, ENGINE_SUBDIR), { recursive: true, dereference: true })
     // The installer script (.iss) references its UI language file relatively;
@@ -482,7 +426,7 @@ class WindowsWebBuild {
 
   /** Print the assembled tree summary. */
   async printSummary(): Promise<void> {
-    const entries = [TRAY_EXE, 'dsh-web.exe', NODE_SUBDIR, ENGINE_SUBDIR, PLUGINS_SUBDIR, DATA_SUBDIR]
+    const entries = [TRAY_EXE, NODE_SUBDIR, ENGINE_SUBDIR]
     console.log('build-windows-web: install tree:')
     for (const name of entries) {
       const p = join(STAGE, name)
@@ -542,9 +486,6 @@ async function main(): Promise<void> {
   await pipeline.resetStage()
   await pipeline.deployEngine()
   await pipeline.copyNodeRuntime()
-  await pipeline.seedPlugins()
-  await pipeline.seedDataDir()
-  await pipeline.compileLauncher()
   await pipeline.buildTrayHost()
   await pipeline.compileInstaller()
   await pipeline.printSummary()

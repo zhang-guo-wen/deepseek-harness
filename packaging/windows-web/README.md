@@ -1,39 +1,44 @@
 # DeepSeek Harness Web — Windows installer build
 
 This directory packages `dsh web` (the browser GUI) as a Windows installer. The
-result is a per-user install:
+result is a per-user install with a single native tray-host entry point:
 
-1. A native system-tray host (`DshWebTray.exe`) you double-click / launch from the
-   tray. It spawns the web engine, listens in the tray ("打开页面" / "退出"), and
-   opens your default browser automatically on first launch.
+1. A native system-tray host (`DeepSeek Harness.exe`) you double-click / launch
+   from the tray. It spawns the web engine, listens in the tray ("打开页面" /
+   "退出"), and opens your default browser automatically on first launch.
 2. The host boots the web engine, serves the frontend dist, and shows the page in
    a tray icon; the port is a random OS-assigned one (no 3080 collision).
-3. The install directory has a `plugins/` folder; plugins added there are loaded
-   without rebuilding the engine.
+3. Plugin loading uses the harness's own default mechanism: **DSH_HOME is the
+   user's `~/.dsh`**, and the `web` profile's own `cordis.patch.yml` mounts the
+   user's plugins. There is no separate `plugins/` directory.
 
 ## What the build produces
 
 ```
 dist-windows-web/
   DeepSeek Harness.exe   native (Go) system-tray host — the app entry
-  dsh-web.exe            thin pkg-compiled launcher (secondary, no tray)
-  node/
+  node/                  bundled Node runtime (the user needs no Node install)
   engine/                the web engine closure (@deepseek-ai/dsh deploy)
-  plugins/               ★ user plugin directory (+ cordis.patch.yml layer)
-  data/                  fallback writable DSH home; the installer's default is ~/.dsh
+                         (node_modules/…: host + client plugins, cordis,
+                          dsh-base, dsh-web-app, web-frontend dist)
 dsh-web-setup.exe        ← build --iscc compiles this from the above
 ```
 
-The installer records the chosen DSH_HOME in `<install>\dsh-config.txt`
-(`DSH_HOME=<path>`); both the tray host and the launcher read it. `data/` is
-used only when the user picks the self-contained option or no config exists.
-
 The tray host reuses the existing `dsh web` surface end to end: it spawns
-`node <install>/node/node.exe <install>/engine/lib/bin.js web --patch <install>/plugins/cordis.patch.yml --port 0 --no-open`,
+`node <install>/node/node.exe <install>/engine/lib/bin.js web --port 0 --no-open`,
 reads the printed URL to learn the actual port, and shows a tray icon with
-"打开页面" / "退出". The web profile composes `dsh-base` + `dsh-web-app`, serves
-the built frontend dist; the plugin directory is just an extra `--patch` layer,
-so it rides the shipped composition without changes to the engine.
+"打开页面" / "退出". The web profile composes `dsh-base` + `dsh-web-app` and
+serves the built frontend dist. No `--patch` is passed, so plugin mounting rides
+the `web` profile's own `cordis.patch.yml` — the harness's default load path.
+
+### DSH_HOME and plugin sharing
+
+DSH_HOME is fixed to the user's `~/.dsh` (same home a source-launched
+DeepSeek Harness uses), so plugins installed into the `web` profile are shared
+between the source and the installed build. The installer does not ask for a
+home; the tray host resolves `~/.dsh` from `%USERPROFILE%` at launch. `~/.dsh`
+is created on first run if absent, and the `web` profile initializes on first
+boot.
 
 ### Harness guardian
 
@@ -43,35 +48,34 @@ the tray restarts it automatically with a short delay. After too many crashes
 in a 30 s window (5 by default) the reboot is dropped and the reason is
 surfaced via the tray status item, the tooltip, and the log file. Choosing
 "退出" sets the stopping flag so a quit is never followed by a restart. The
-harness `stderr` is now written to `<DSH_HOME>\harness.log` (the tray app has no
+harness `stderr` is written to `<DSH_HOME>\harness.log` (the tray app has no
 console) so a crash's cause is diagnosable even when only a status item is
 shown.
 
 ### "纯净启动" (clean start) in the tray menu
 
-A tray checkbox "纯净启动" toggles whether the harness is started without any
-user-installed plugin. When enabled, the tray host passes the empty patch layer
-`<install>\plugins\clean.patch.yml` (content `[]`) instead of the user's
-`plugins\cordis.patch.yml`, so no external plugin is mounted. The user's
-`cordis.patch.yml` is never modified, so the toggle is fully reversible. Since
-`--patch` is a boot-time argument, toggling the checkbox while the harness is
-running restarts it; the toggle resets the crash counter so a manual switch is
-never counted as a crash. Handy for diagnosing whether a crashed or
-misbehaving harness was caused by an installed plugin (clean start keeps the
-core `dsh-base` + `dsh-web-app` composition).
+A tray checkbox "纯净启动" toggles whether the harness boots against a
+**temporary empty DSH_HOME** (`<install>\clean-data`) instead of the user's
+`~/.dsh`. That home's `web` profile is never seeded with plugins, so no user
+plugin is loaded at all — isolating whether a crash or misbehavior is caused by
+an installed plugin while keeping the core `dsh-base` + `dsh-web-app`
+composition. Toggling the checkbox restarts the harness to apply the new home,
+and resets the crash counter so a manual switch is never counted as a crash.
+The user's `~/.dsh` is never touched, so the toggle is fully reversible.
+
+> The harness child process is spawned with `CREATE_NO_WINDOW`, so no console
+> window is created even though the host itself is a GUI app.
 
 ## Prerequisites (on the build machine)
 
 - Node `^22.19 || >=24` and pnpm (`pnpm@11.7.0`).
 - A Node **distribution** to bundle (a folder containing `node.exe`) — pass it via
   `--node-dir`. A bare running `node.exe` is not the full distribution.
+- Go toolchain to build the tray host (or a prebuilt `DeepSeek Harness.exe`).
 - Inno Setup 6+ (`ISCC.exe`) only to compile the installer. Optional: the build
   stops at the install tree without `--iscc`. The installer wizard is Chinese;
   `build.ts` copies `languages/ChineseSimplified.isl` next to the compiled
-  `.iss`, so no separate Inno language-pack install is needed. (The shipped
-  language file targets Inno 6.5.0+; on an older Inno the wizard falls back to
-  its built-in English defaults for framework labels while the steps and info
-  added here stay Chinese.)
+  `.iss`, so no separate Inno language-pack install is needed.
 
 ## Build
 
@@ -93,43 +97,10 @@ pnpm exec tsx packaging/windows-web/build.ts --node-dir <node-dist> --iscc <ISCC
 
 ## Run
 
-Double-click `dsh-web.exe` (already-installed: the Start menu / desktop shortcut).
-It boots the web profile, and opens the browser. Pass-through flags work from a
-terminal, e.g. `dsh-web.exe --no-open` or `dsh-web.exe --port 8080`.
-
-### Data & plugin home (DSH_HOME) is chosen at install time
-
-The installer is a Chinese-language wizard that asks **"选择数据与插件家园"**
-(choose the data & plugin home). The choice is recorded in
-`<install>\dsh-config.txt` as `DSH_HOME=<path>`:
-
-- **使用用户主目录 ~/.dsh（默认，推荐）** — the writable home is the same
-  `~/.dsh` a source-launched DeepSeek Harness uses, so plugins installed into
-  the `web` profile are shared between the source and the installed build.
-- **使用安装目录内的 data（自包含）** — everything stays under
-  `<install>\data`, fully independent and isolated from the user home.
-
-Both `dsh-web.exe` and the `DeepSeek Harness.exe` tray host read
-`dsh-config.txt` at launch and set `DSH_HOME` accordingly. When the file is
-absent (e.g. an old install) they fall back to `<install>\data`.
-
-## Adding a plugin
-
-1. Install the plugin package into `<install>\plugins\node_modules\` (the launcher
-   junctions that directory to the **chosen** home's `web` profile `node_modules`,
-   so a plugin there lives inside the profile subtree and its `@deepseek-ai/cordis`
-   import falls through to the installation's single instance via the healed
-   `$DSH_HOME\profiles\node_modules` fallback). With the default `~/.dsh` home this
-   is the same plugin home the source build uses.
-2. Add a row to `<install>\plugins\cordis.patch.yml`:
-   ```yaml
-   - id: my-plugin
-     name: '@dsh/my-plugin'
-   ```
-3. Restart the app. The plugin mounts on top of the shipped web composition.
-
-`packaging/windows-web/sample-plugin/` is a minimal working example; copy its
-patch row to try it.
+Double-click `DeepSeek Harness.exe` (already-installed: the Start menu / desktop
+shortcut). It resolves `~/.dsh`, boots the `web` profile with the user's plugins
+mounted, and opens the browser. The tray menu offers "打开页面" / "纯净启动" /
+"退出".
 
 ## Verified on Windows
 
@@ -140,20 +111,12 @@ Built and exercised end to end on a real Windows host with this scaffold:
   `@deepseek-ai/*` workspace packages, so the build restores the missing
   workspace closure (cosmokit, schemastery, cordis-plugin-group, and transitively
   the rest) as a self-healing step.
-- **Launcher exe** — `dsh-web.exe` (pkg-compiled, ~87 MB, bundles Node) runs
-  and boots `dsh web`. The launcher spawns the bundled Node, so `openBrowser`'s
-  handoff is unaffected by the pkg exe.
-- **Plugin directory resolution** — the launcher junctions
-  `plugins\node_modules` to the web profile's `node_modules`. A plugin dropped
-  into `plugins\` lives inside the profile subtree and its `@deepseek-ai/cordis`
-  import resolves via the healed `$DSH_HOME\profiles\node_modules` fallback to
-  the one shared instance (validated on the Windows filesystem, including the
-  junction + fall-through).
+- **Tray host** — `go build -ldflags "-H windowsgui"` yields a console-less
+  `DeepSeek Harness.exe` that boots `dsh web` and serves the page (HTTP 200 with
+  `__DSH_BOOT__`).
 - **Installer** — `pnpm run build && pnpm run build:web` then
   `pnpm exec tsx packaging/windows-web/build.ts --node-dir <node> --iscc <ISCC.exe>`
-  produces `dist-windows-web\dsh-web-setup.exe` (~68 MB). A silent install, then
-  running the installed `dsh-web.exe`, boots `dsh web` and serves the page
-  (HTTP 200 with `__DSH_BOOT__`).
+  produces `dist-windows-web\dsh-web-setup.exe`.
 
 ### Why the installer compiles from a short path
 
@@ -178,5 +141,5 @@ in the child, so assert with a tool or host signal rather than a console.log).
   the Python SDK exe (the web GUI is the full product).
 
 These gaps are the reason this is a scaffold rather than a shipped artifact: the
-pipeline and the plugin-directory contract are in place; the remaining work is
-Windows-specific verification and the plugin-module-fallback resolution.
+pipeline and the DSH_HOME/plugin contract are in place; the remaining work is
+Windows-specific verification and the plugin resolution of `~/.dsh`.
