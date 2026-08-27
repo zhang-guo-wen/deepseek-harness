@@ -68,8 +68,11 @@ Name: "{app}\data"; Flags: uninsneveruninstall
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 
-[Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+; No auto-run on install finish: the harness first launch heals the engine's
+; built-in packages into {app}\data, and launching it from the installer's
+; postinstall step races that heal (the module fallback isn't ready yet), which
+; the guardian then restarts in a loop. The user starts it by double-clicking
+; the shortcut / DeepSeek Harness.exe once the install finishes.
 
 [UninstallDelete]
 ; Only remove the install tree; the install-local DSH_HOME ({app}\data) persists.
