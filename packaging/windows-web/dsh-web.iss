@@ -28,6 +28,9 @@ AppPublisher={#MyAppPublisher}
 ; Per-user install: no admin needed; the writable DSH_HOME (install\data) stays writable.
 PrivilegesRequired=lowest
 DefaultDirName={localappdata}\Programs\DeepSeekHarness
+; Don't reuse a previous install directory: a stale user-chosen path (e.g. a
+; root-level test install) would otherwise override DefaultDirName on upgrade.
+UsePreviousAppDir=no
 DisableProgramGroupPage=yes
 OutputDir={#Stage}
 OutputBaseFilename=DeepSeekHarnessSetup
