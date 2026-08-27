@@ -12,11 +12,12 @@
 //     the tooltip, and a log file (the tray has no console).
 //
 // Plugin loading uses the harness's own default mechanism: the DSH_HOME is the
-// user's `~/.dsh`, and the `web` profile's own `cordis.patch.yml` mounts the
-// user's plugins. There is no separate `plugins/` directory or junction; a
-// "纯净启动" toggle instead boots the harness against a temporary empty
-// DSH_HOME (`<install>\clean-data`) whose `web` profile is never seeded with
-// plugins, so no user plugin is loaded at all.
+// install-local `data` directory, self-contained so the harness heals the full
+// engine's built-in packages into it instead of depending on the user's ~/.dsh.
+// There is no separate `plugins/` directory or junction; a "纯净启动" toggle
+// instead boots the harness against a temporary empty DSH_HOME
+// (`<install>\clean-data`) whose `web` profile is never seeded with plugins, so
+// no user plugin is loaded at all.
 //
 // Built with `go build -ldflags "-H windowsgui"` so it runs without a console.
 package main
@@ -61,6 +62,9 @@ const (
 	restartWindow = 30 * time.Second
 	// crashDelay 是连续两次拉起之间的间隔，避免瞬间反复重启。
 	crashDelay = 2 * time.Second
+	// dataSubdir 是安装包版自包含的 DSH_HOME 目录名（<install>\<name>）。
+	// 由安装包自己 heal 完整内置包，不依赖源码版的 ~/.dsh。
+	dataSubdir = "data"
 	// cleanHomeSubdir 是纯净启动用的临时 DSH_HOME 目录名（<install>\<name>）。
 	cleanHomeSubdir = "clean-data"
 )
@@ -88,7 +92,7 @@ func onReady() {
 		install:   install,
 		nodeBin:   filepath.Join(install, "node", "node.exe"),
 		engineBin: filepath.Join(install, "engine", "lib", "bin.js"),
-		userHome:  userDshHome(),
+		userHome:  filepath.Join(install, dataSubdir),
 		cleanHome: filepath.Join(install, cleanHomeSubdir),
 	}
 	// 确保正常 DSH_HOME 的 web profile 目录存在，首次运行 harness 会自动初始化。
@@ -317,14 +321,6 @@ func onExit() {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
-}
-
-// userDshHome 返回用户的 DSH 家目录（~/.dsh）。Windows 上用 %USERPROFILE%。
-func userDshHome() string {
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		return filepath.Join(home, ".dsh")
-	}
-	return ".dsh"
 }
 
 // pruneOldRestarts 丢弃窗口外的崩溃记录，使计数只反映最近 restartWindow。
