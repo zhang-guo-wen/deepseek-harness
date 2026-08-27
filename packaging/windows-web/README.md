@@ -52,17 +52,18 @@ harness `stderr` is written to `<DSH_HOME>\harness.log` (the tray app has no
 console) so a crash's cause is diagnosable even when only a status item is
 shown.
 
-### "纯净启动" (clean start) in the tray menu
+### "纯净启动" (clean start) on repeated crashes
 
-A tray checkbox "纯净启动" toggles whether the harness boots against a
-**temporary empty DSH_HOME** (`<install>\clean-data`) instead of the normal
-`<install>\data` home. That home's `web` profile is never seeded with plugins,
-so no user plugin is loaded at all — isolating whether a crash or misbehavior
-is caused by an installed plugin while keeping the core `dsh-base` +
-`dsh-web-app` composition. Toggling the checkbox restarts the harness to apply
-the new home, and resets the crash counter so a manual switch is never counted
-as a crash. The normal `<install>\data` home is never touched, so the toggle is
-fully reversible.
+When the harness repeatedly fails to start (crashes more than 5 times in a 30 s
+window — often because an installed plugin throws at load), the tray host pops a
+Windows dialog asking whether to enter "纯净启动". On **yes**, it boots the
+harness against a **temporary empty DSH_HOME** (`<install>\clean-data`) instead of
+the normal `<install>\data` home. That home's `web` profile is never seeded with
+plugins, so no user plugin is loaded at all — isolating whether a crash was
+caused by an installed plugin while keeping the core `dsh-base` +
+`dsh-web-app` composition. On **no**, the tray stops restarting and exits the
+guardian. The normal `<install>\data` home is never modified, so clean start is
+fully reversible (close the tray and relaunch to return to your normal home).
 
 > The harness child process is spawned with `CREATE_NO_WINDOW`, so no console
 > window is created even though the host itself is a GUI app.

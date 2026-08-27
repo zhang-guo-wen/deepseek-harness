@@ -34,6 +34,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"github.com/getlantern/systray"
 )
@@ -102,30 +103,14 @@ func onReady() {
 	systray.SetIcon(trayIcon)
 	systray.SetTooltip("DeepSeek Harness Web")
 	statusItem := systray.AddMenuItem("harness 运行中", "DeepSeek Harness 状态")
-	cleanItem := systray.AddMenuItemCheckbox("纯净启动", "重启 harness，用空白数据目录启动（不加载任何已安装插件，诊断插件导致的崩溃）", false)
 	openItem := systray.AddMenuItem("打开页面", "在默认浏览器中打开")
 	systray.AddSeparator()
 	exitItem := systray.AddMenuItem("退出", "退出 DeepSeek Harness")
 
-	// 守护循环：只有 install 完整时才启动；异常退出自动拉起，超次暂停并提示。
+	// 守护循环：只有 install 完整时才启动；异常退出自动拉起，超次弹窗询问是否进入纯净模式。
 	if fileExists(paths.nodeBin) && fileExists(paths.engineBin) {
 		go monitorLoop(paths, statusItem)
 	}
-
-	// "纯净启动"切换：翻转 cleanStart；若 harness 在跑，重启它以应用新的
-	// DSH_HOME。用户主动操作不计数为崩溃（重置崩溃统计）。
-	go func() {
-		for range cleanItem.ClickedCh {
-			mu.Lock()
-			cleanStart = cleanItem.Checked()
-			restartTimes = nil
-			c := child
-			if !stopping && c != nil && c.Process != nil {
-				_ = c.Process.Kill()
-			}
-			mu.Unlock()
-		}
-	}()
 
 	go func() {
 		for {
@@ -164,10 +149,22 @@ func monitorLoop(paths harnessPaths, statusItem *systray.MenuItem) {
 		}
 		// 子进程异常退出：检查是否已连续崩溃过多。
 		if overRestartBudget() {
+			// 崩溃超过阈值：弹窗询问是否进入纯净模式（用临时空家园隔离插件）。
+			if askCleanMode() {
+				// 进入纯净模式：切换 DSH_HOME 到 clean-data，清零崩溃计数后继续。
+				mu.Lock()
+				cleanStart = true
+				restartTimes = nil
+				mu.Unlock()
+				statusItem.SetTitle("harness 运行中（纯净启动）")
+				time.Sleep(crashDelay)
+				continue
+			}
+			// 用户选择不进入纯净模式：不再拉起，退出守护。
+			mu.Lock()
+			stopping = true
+			mu.Unlock()
 			statusItem.SetTitle("harness 已暂停重启")
-			tip := "harness 连续崩溃，已暂停自动重启。请查看日志：" + logPathOf(paths)
-			systray.SetTooltip(tip)
-			statusItem.SetTooltip(tip)
 			return
 		}
 		recordRestart()
@@ -321,6 +318,34 @@ func onExit() {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// askCleanMode 用一个 Windows 消息框询问用户：harness 连续崩溃后是否进入
+// "纯净启动"（用临时空家园启动以隔离插件导致的问题）。返回 true=进入纯净
+// 模式，false=不进入（退出）。托盘宿主是无控制台的 GUI，没有可用的气泡通知，
+// 所以用 user32!MessageBoxW 弹原生对话框。
+func askCleanMode() bool {
+	const (
+		mbYesNo         = 0x00000004 // MB_YESNO
+		mbIconQuestion  = 0x00000020 // MB_ICONQUESTION
+		mbDefButton2    = 0x00000100 // MB_DEFBUTTON2 (默认第二个按钮"否")
+		idYes           = 6          // IDYES
+	)
+	user32 := syscall.NewLazyDLL("user32.dll")
+	proc := user32.NewProc("MessageBoxW")
+	title, _ := syscall.UTF16PtrFromString("DeepSeek Harness")
+	text, _ := syscall.UTF16PtrFromString(
+		"harness 反复启动失败，可能是某个已安装插件导致的。\n\n" +
+			"是否进入“纯净启动”？（用空白数据目录启动，不加载任何已安装插件）\n\n" +
+			"是 = 进入纯净启动   否 = 退出")
+	ret, _, _ := proc.Call(
+		0,
+		uintptr(unsafe.Pointer(title)),
+		uintptr(unsafe.Pointer(text)),
+		0,
+		uintptr(mbYesNo|mbIconQuestion|mbDefButton2),
+	)
+	return ret == idYes
 }
 
 // pruneOldRestarts 丢弃窗口外的崩溃记录，使计数只反映最近 restartWindow。
