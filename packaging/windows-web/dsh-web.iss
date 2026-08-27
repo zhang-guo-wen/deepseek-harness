@@ -34,6 +34,10 @@ DefaultDirName=C:\DeepSeekHarness
 ; Don't reuse a previous install directory: a stale user-chosen path (e.g. a
 ; root-level test install) would otherwise override DefaultDirName on upgrade.
 UsePreviousAppDir=no
+; Force the directory to C:\DeepSeekHarness: hide the "choose install directory"
+; page so the user cannot pick a path that would push the @mistralai file paths
+; past Inno's 260-char MAX_PATH.
+DisableDirPage=yes
 DisableProgramGroupPage=yes
 OutputDir={#Stage}
 OutputBaseFilename=DeepSeekHarnessSetup
