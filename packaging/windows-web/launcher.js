@@ -10,12 +10,20 @@
 // layer so plugins dropped into `plugins/` are mounted without rebuilding the
 // engine.
 //
+// The writable DSH home (DSH_HOME) and the plugin home are decided at install
+// time by the installer and recorded in `<install>/dsh-config.txt` as
+// `DSH_HOME=<path>`. The launcher reads that file; when absent it falls back
+// to `<install>/data` (the self-contained layout). The chosen DSH_HOME drives
+// both the spawned process's DSH_HOME env and where `plugins/` is junctioned
+// (the web profile's node_modules), so the user's "+ ~/.dsh" choice keeps
+// plugins shared with a source-launched harness.
+//
 // NOTE: this file is pkg-compiled, so it must stay plain JavaScript (no
 // TypeScript annotations) — pkg's Babel parser does not transform TS.
 // It uses only Node built-ins so pkg can bundle it without a dependency tree.
 
 import { spawn } from 'node:child_process'
-import { existsSync, lstatSync, mkdirSync, readlinkSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 // In the packaged exe `process.execPath` is dsh-web.exe; its directory is the
@@ -23,14 +31,14 @@ import { dirname, join } from 'node:path'
 // process's own executable directory.
 const INSTALL = dirname(process.execPath)
 
-/** Writable DSH home (profiles, storage, credentials) created on first launch. */
-const DATA_DIR = join(INSTALL, 'data')
+/** Config file the installer writes: records the chosen DSH_HOME. */
+const CONFIG_FILE = join(INSTALL, 'dsh-config.txt')
+/** Fallback DSH home when no config exists (self-contained layout). */
+const DEFAULT_DATA_DIR = join(INSTALL, 'data')
 /** Bundled Node runtime. */
 const NODE_BIN = join(INSTALL, 'node', 'node.exe')
 /** The deployed dsh command inside the engine closure (the deploy root is the app package). */
 const DSH_BIN = join(INSTALL, 'engine', 'lib', 'bin.js')
-/** The dsh web profile's own node_modules — the out-of-tree plugin home. */
-const PROFILE_NODE_MODULES = join(DATA_DIR, 'profiles', 'web', 'node_modules')
 /** The user-facing plugins directory. */
 const PLUGINS_DIR = join(INSTALL, 'plugins')
 /** User plugin packages land here; junctioned to the web profile's node_modules. */
@@ -43,6 +51,29 @@ function fail(message) {
   console.error('dsh-web: the install is incomplete. Run the installer again, or build with `pnpm exec tsx packaging/windows-web/build.ts --node-dir <node> --iscc <ISCC.exe>`.')
   process.exit(1)
 }
+
+/**
+ * Read the DSH_HOME recorded by the installer. The config is one
+ * `DSH_HOME=<path>` line; a missing file, an unreadable file, or an empty
+ * value all fall back to `<install>/data`.
+ * @returns {string} the chosen DSH_HOME absolute path.
+ */
+function readConfigHome() {
+  try {
+    const text = readFileSync(CONFIG_FILE, 'utf8')
+    const match = text.match(/^DSH_HOME\s*=\s*(.+)$/m)
+    if (match && match[1].trim() !== '') return match[1].trim()
+  } catch {
+    // Missing/unreadable config: fall back to the self-contained data dir.
+  }
+  return DEFAULT_DATA_DIR
+}
+
+/** The writable DSH home the launcher will use (from config, else default). */
+const DATA_DIR = readConfigHome()
+
+/** The dsh web profile's own node_modules — the out-of-tree plugin home. */
+const PROFILE_NODE_MODULES = join(DATA_DIR, 'profiles', 'web', 'node_modules')
 
 /**
  * Make the user-facing `plugins/` directory the web profile's out-of-tree

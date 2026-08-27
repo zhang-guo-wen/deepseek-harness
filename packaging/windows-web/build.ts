@@ -78,6 +78,8 @@ class BuildCli {
     readonly nodeDir: string | undefined,
     /** Path to the Inno Setup compiler (ISCC.exe); skip the installer step when absent. */
     readonly iscc: string | undefined,
+    /** Force a fresh `go build` of the tray host even when a prebuilt exe exists. */
+    readonly rebuildTrayHost: boolean,
   ) { }
 
   static parse(argv: string[]): BuildCli {
@@ -98,6 +100,7 @@ class BuildCli {
       values['dry-run'] ?? false,
       values['node-dir'] as string | undefined,
       values['iscc'] as string | undefined,
+      values['rebuild-tray-host'] ?? false,
     )
   }
 
@@ -109,6 +112,7 @@ class BuildCli {
         'dry-run': { type: 'boolean', default: false },
         'node-dir': { type: 'string' },
         'iscc': { type: 'string' },
+        'rebuild-tray-host': { type: 'boolean', default: false },
         'help': { type: 'boolean', default: false },
       },
     }).values
@@ -121,6 +125,7 @@ class BuildCli {
       '  --skip-build         skip `pnpm run build` and `pnpm run build:web` (lib/ + dist/ must exist).',
       '  --node-dir <path>    path to a Node distribution folder (must contain node.exe) to bundle.',
       '  --iscc <path>        path to ISCC.exe to compile the installer; omit to stop at the install tree.',
+      '  --rebuild-tray-host  force a fresh `go build` of the tray host instead of reusing a prebuilt exe.',
       '  --dry-run            print every command and filesystem change without executing.',
       '  --help               print this help.',
       '',
@@ -392,9 +397,15 @@ class WindowsWebBuild {
       return
     }
     // Reuse a prebuilt tray host if present, so a later build needs no Go toolchain.
-    if (existsSync(product)) {
+    // Pass --rebuild-tray-host to force a fresh `go build` (after tray-host source
+    // changes that a stale prebuilt exe would otherwise mask).
+    if (existsSync(product) && !this.cli.rebuildTrayHost) {
       console.log(`build-windows-web: reusing prebuilt tray host ${product}`)
       return
+    }
+    // Remove a stale prebuilt so `go build` overwrites the product path.
+    if (existsSync(product)) {
+      await rm(product, { recursive: true, force: true })
     }
     const srcDir = resolve(root, 'packaging/windows-web/tray-host')
     if (!existsSync(join(srcDir, 'go.mod'))) {
@@ -429,7 +440,9 @@ class WindowsWebBuild {
     await this.copyForInstaller(shortStage)
     const tempIss = join(shortStage, 'dsh-web.iss')
     const template = await readFile(resolve(root, 'packaging/windows-web/dsh-web.iss'), 'utf8')
-    await writeFile(tempIss, template.replace(/#define Stage ".*"/, `#define Stage "${shortStage}"`), 'utf8')
+    // Prepend a UTF-8 BOM: readFile('utf8') strips the source BOM, and Inno 6
+    // parses a BOM-less .iss as ANSI, which would mojibake the Chinese UI strings.
+    await writeFile(tempIss, '\uFEFF' + template.replace(/#define Stage ".*"/, `#define Stage "${shortStage}"`), 'utf8')
     await this.run('installer', iscc, [tempIss])
     const stagedSetup = join(shortStage, SETUP_OUTPUT)
     if (!existsSync(stagedSetup)) {
@@ -454,6 +467,17 @@ class WindowsWebBuild {
     await cp(join(STAGE, 'dsh-web.exe'), join(shortStage, 'dsh-web.exe'))
     await cp(join(STAGE, NODE_SUBDIR), join(shortStage, NODE_SUBDIR), { recursive: true, dereference: true })
     await cp(join(STAGE, ENGINE_SUBDIR), join(shortStage, ENGINE_SUBDIR), { recursive: true, dereference: true })
+    // The installer script (.iss) references its UI language file relatively;
+    // stage it alongside the temporary .iss that gets compiled in shortStage.
+    // The assembled .iss is written to shortStage, and ChineseSimplified.isl is
+    // kept at packaging/windows-web/languages relative to the repo root.
+    const langSrc = resolve(root, 'packaging/windows-web/languages', 'ChineseSimplified.isl')
+    if (existsSync(langSrc)) {
+      await mkdir(join(shortStage, 'languages'), { recursive: true })
+      await cp(langSrc, join(shortStage, 'languages', 'ChineseSimplified.isl'))
+    } else {
+      throw new Error(`build-windows-web: Inno language file missing at ${langSrc}`)
+    }
   }
 
   /** Print the assembled tree summary. */

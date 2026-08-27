@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 
 	"github.com/getlantern/systray"
@@ -46,7 +47,8 @@ func onReady() {
 	nodeBin := filepath.Join(install, "node", "node.exe")
 	engineBin := filepath.Join(install, "engine", "lib", "bin.js")
 	pluginPatch := filepath.Join(install, "plugins", "cordis.patch.yml")
-	dataDir := filepath.Join(install, "data")
+	// DSH_HOME 由安装器写入 <install>/dsh-config.txt；缺失时回退自包含的 data/
+	dataDir := readConfigHome(install)
 	_ = os.MkdirAll(dataDir, 0o755)
 	// A missing `--patch` file is a hard boot error; seed an empty list on first run.
 	_ = os.MkdirAll(filepath.Dir(pluginPatch), 0o755)
@@ -127,4 +129,24 @@ func openBrowser(url string) {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// readConfigHome 读取安装器写入的 <install>/dsh-config.txt 里的 DSH_HOME。
+// 文件缺失、不可读或值为空时回退到自包含的 <install>/data。
+func readConfigHome(install string) string {
+	configPath := filepath.Join(install, "dsh-config.txt")
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		return filepath.Join(install, "data")
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimRight(line, "\r")
+		key, value, ok := strings.Cut(line, "=")
+		if ok && strings.TrimSpace(key) == "DSH_HOME" {
+			if home := strings.TrimSpace(value); home != "" {
+				return home
+			}
+		}
+	}
+	return filepath.Join(install, "data")
 }

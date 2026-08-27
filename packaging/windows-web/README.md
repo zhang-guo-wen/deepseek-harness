@@ -15,14 +15,18 @@ result is a per-user install:
 
 ```
 dist-windows-web/
-  DshWebTray.exe         native (Go) system-tray host — the app entry
+  DeepSeek Harness.exe   native (Go) system-tray host — the app entry
   dsh-web.exe            thin pkg-compiled launcher (secondary, no tray)
   node/
   engine/                the web engine closure (@deepseek-ai/dsh deploy)
   plugins/               ★ user plugin directory (+ cordis.patch.yml layer)
-  data/                  writable DSH home (profiles, storage, credentials)
+  data/                  fallback writable DSH home; the installer's default is ~/.dsh
 dsh-web-setup.exe        ← build --iscc compiles this from the above
 ```
+
+The installer records the chosen DSH_HOME in `<install>\dsh-config.txt`
+(`DSH_HOME=<path>`); both the tray host and the launcher read it. `data/` is
+used only when the user picks the self-contained option or no config exists.
 
 The tray host reuses the existing `dsh web` surface end to end: it spawns
 `node <install>/node/node.exe <install>/engine/lib/bin.js web --patch <install>/plugins/cordis.patch.yml --port 0 --no-open`,
@@ -37,7 +41,12 @@ so it rides the shipped composition without changes to the engine.
 - A Node **distribution** to bundle (a folder containing `node.exe`) — pass it via
   `--node-dir`. A bare running `node.exe` is not the full distribution.
 - Inno Setup 6+ (`ISCC.exe`) only to compile the installer. Optional: the build
-  stops at the install tree without `--iscc`.
+  stops at the install tree without `--iscc`. The installer wizard is Chinese;
+  `build.ts` copies `languages/ChineseSimplified.isl` next to the compiled
+  `.iss`, so no separate Inno language-pack install is needed. (The shipped
+  language file targets Inno 6.5.0+; on an older Inno the wizard falls back to
+  its built-in English defaults for framework labels while the steps and info
+  added here stay Chinese.)
 
 ## Build
 
@@ -51,23 +60,42 @@ pnpm exec tsx packaging/windows-web/build.ts --node-dir <node-dist> --iscc <ISCC
 ```
 
 - `--skip-build` reuses existing artifacts; `--dry-run` prints the plan.
+- `--rebuild-tray-host` forces a fresh `go build` of the tray host instead of
+  reusing a prebuilt `DeepSeek Harness.exe` (needed after editing
+  `tray-host/main.go`, because a stale prebuilt would otherwise mask the change).
 - Without `--iscc`, you get the `dist-windows-web/` tree; run Inno Setup on
   `packaging/windows-web/dsh-web.iss` to compile `dsh-web-setup.exe`.
 
 ## Run
 
 Double-click `dsh-web.exe` (already-installed: the Start menu / desktop shortcut).
-It sets `DSH_HOME=<install>\data`, boots the web profile, and opens the browser.
-Pass-through flags work from a terminal, e.g. `dsh-web.exe --no-open` or
-`dsh-web.exe --port 8080`.
+It boots the web profile, and opens the browser. Pass-through flags work from a
+terminal, e.g. `dsh-web.exe --no-open` or `dsh-web.exe --port 8080`.
+
+### Data & plugin home (DSH_HOME) is chosen at install time
+
+The installer is a Chinese-language wizard that asks **"选择数据与插件家园"**
+(choose the data & plugin home). The choice is recorded in
+`<install>\dsh-config.txt` as `DSH_HOME=<path>`:
+
+- **使用用户主目录 ~/.dsh（默认，推荐）** — the writable home is the same
+  `~/.dsh` a source-launched DeepSeek Harness uses, so plugins installed into
+  the `web` profile are shared between the source and the installed build.
+- **使用安装目录内的 data（自包含）** — everything stays under
+  `<install>\data`, fully independent and isolated from the user home.
+
+Both `dsh-web.exe` and the `DeepSeek Harness.exe` tray host read
+`dsh-config.txt` at launch and set `DSH_HOME` accordingly. When the file is
+absent (e.g. an old install) they fall back to `<install>\data`.
 
 ## Adding a plugin
 
 1. Install the plugin package into `<install>\plugins\node_modules\` (the launcher
-   junctions that directory to the web profile's `node_modules`, so a plugin
-   there lives inside the profile subtree and its `@deepseek-ai/cordis` import
-   falls through to the installation's single instance via the healed
-   `$DSH_HOME\profiles\node_modules` fallback).
+   junctions that directory to the **chosen** home's `web` profile `node_modules`,
+   so a plugin there lives inside the profile subtree and its `@deepseek-ai/cordis`
+   import falls through to the installation's single instance via the healed
+   `$DSH_HOME\profiles\node_modules` fallback). With the default `~/.dsh` home this
+   is the same plugin home the source build uses.
 2. Add a row to `<install>\plugins\cordis.patch.yml`:
    ```yaml
    - id: my-plugin
