@@ -340,9 +340,8 @@ func askCleanMode() bool {
 			"是 = 进入纯净启动   否 = 退出")
 	ret, _, _ := proc.Call(
 		0,
-		uintptr(unsafe.Pointer(title)),
 		uintptr(unsafe.Pointer(text)),
-		0,
+		uintptr(unsafe.Pointer(title)),
 		uintptr(mbYesNo|mbIconQuestion|mbDefButton2),
 	)
 	return ret == idYes
