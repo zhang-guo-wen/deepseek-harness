@@ -246,6 +246,11 @@
     - id: ui-settings-plugin-inventory
       name: '@deepseek-ai/dsh-client-ui-settings-plugin-inventory'
 
+    # Claude/Codex rule-injection master toggles ("harness兼容") over the host
+    # `context-injection` settings namespace owned by @deepseek-ai/dsh-claude-compat.
+    - id: ui-context-injection
+      name: '@deepseek-ai/dsh-client-ui-context-injection'
+
     - id: ui-conversation
       name: '@deepseek-ai/dsh-client-ui-conversation'
 
