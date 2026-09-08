@@ -273,6 +273,7 @@
       "@deepseek-ai/dsh-code-runtime-worker-thread": ["./packages/code-runtime/code-runtime-worker-thread/src"],
       "@deepseek-ai/dsh-command-compact": ["./packages/compaction/command-compact/src"],
       "@deepseek-ai/dsh-command-feedback": ["./packages/feedback/command-feedback/src"],
+      "@deepseek-ai/dsh-command-btw": ["./packages/context/command-btw/src"],
       "@deepseek-ai/dsh-command-goal": ["./packages/goal/command-goal/src"],
       "@deepseek-ai/dsh-commands": ["./packages/interaction/commands/src"],
       "@deepseek-ai/dsh-commands/invariant": ["./packages/interaction/commands/src/invariant.ts"],

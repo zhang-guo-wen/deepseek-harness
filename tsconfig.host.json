@@ -213,6 +213,7 @@
     { "path": "./packages/schedule/schedule" },
     { "path": "./packages/context/time-context" },
     { "path": "./packages/context/file-reference" },
+    { "path": "./packages/context/command-btw" },
     { "path": "./packages/context/file-reference-local" },
     { "path": "./packages/context/tmux-context" },
     { "path": "./packages/context/session-reference" },

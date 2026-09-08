@@ -289,6 +289,13 @@
     - id: command-feedback
       name: '@deepseek-ai/dsh-command-feedback'
 
+    - id: command-btw
+      name: '@deepseek-ai/dsh-command-btw'
+      config:
+        maxQuestionBytes: 4096
+        maxOutputTokens: 256
+        timeoutMs: 30000
+
     - id: goal
       name: '@deepseek-ai/dsh-goal'
 
