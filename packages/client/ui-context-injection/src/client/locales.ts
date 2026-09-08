@@ -7,11 +7,13 @@
 export const NS = 'settings.contextInjection'
 
 const zh = {
-  'nav': 'harness兼容',
+  'nav': 'Harness兼容',
   'claude': '加载 Claude 规则',
-  'claude.desc': '把项目与全局的 Claude Code 规则（CLAUDE.md）与 skills 注入到首条请求',
+  'claude.desc': '把项目与全局的 Claude Code 规则与技能注入会话',
+  'claude.files': '注入：.claude/CLAUDE.md、~/.claude/CLAUDE.md、.claude/skills/**、~/.claude/skills/**、.claude/rules/**、~/.claude/rules/**',
   'codex': '加载 Codex 规则',
-  'codex.desc': '把项目与全局的 Codex 规则（AGENTS.md）注入到首条请求',
+  'codex.desc': '把项目与全局的 Codex 规则注入会话',
+  'codex.files': '注入：.codex/AGENTS.md、~/.codex/AGENTS.md',
   'unavailable': '设置当前不可用',
 }
 /** Key union, sourced from the Chinese dictionary. */
@@ -20,9 +22,11 @@ export type ContextInjectionSectionKey = keyof typeof zh
 const en: Record<ContextInjectionSectionKey, string> = {
   'nav': 'Harness Compat',
   'claude': 'Load Claude rules',
-  'claude.desc': 'Inject project and global Claude Code rules (CLAUDE.md) and skills into the first request',
+  'claude.desc': 'Inject project and global Claude Code rules and skills into the session',
+  'claude.files': 'Loads: .claude/CLAUDE.md, ~/.claude/CLAUDE.md, .claude/skills/**, ~/.claude/skills/**, .claude/rules/**, ~/.claude/rules/**',
   'codex': 'Load Codex rules',
-  'codex.desc': 'Inject project and global Codex rules (AGENTS.md) into the first request',
+  'codex.desc': 'Inject project and global Codex rules into the session',
+  'codex.files': 'Loads: .codex/AGENTS.md, ~/.codex/AGENTS.md',
   'unavailable': 'Setting currently unavailable',
 }
 

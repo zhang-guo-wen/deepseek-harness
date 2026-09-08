@@ -20,6 +20,12 @@ The plugin registers one more skill provider (provider name `claude-code`) on `c
 
 Unlike the skills provider, there is no registry seam for instruction files. The plugin contributes `.claude/CLAUDE.md` and `~/.claude/CLAUDE.md` as an additive instructions-form context instead of modifying `agent-instructions`. It listens on `agent/pre-step`, reads the two files, and folds them into an entering decision after the last admitted user message, reusing the `agent/pre-step` waterfall the same way `agent-instructions` does. A missing or unreadable file is not fatal.
 
+### Scoped rules
+
+Rules under `.claude/rules/**` (project) and `~/.claude/rules/**` (user) are folded under a second merge-extensible source kind, `claude-rule`. A rule's YAML frontmatter may carry a `paths:` glob list; a rule without `paths` (or with an empty list) is always-on and folds into the first request like `CLAUDE.md`, while a rule with `paths` is path-scoped and folds into the request that follows a `read` of a file matching one of those globs. Globs are matched against the project-root-relative path with `picomatch`.
+
+The path-scoped trigger listens on `tools/result` for a successful `read` and marks matching scoped rules active on the agent's session; the next `agent/pre-step` folds them. `agent/pre-step` fires once per turn, and a tool-continuation step carries no newly claimed messages, so the rules contributor folds a newly active scoped rule into an empty entering decision (always-on rules stay gated on a non-empty entering step to avoid injecting into a turn with no user prompt). Each rule is folded at most once per session, tracked per session in a `WeakMap`.
+
 To keep the two loaders from managing each other's messages, the injected context carries a new merge-extensible message source `claude-code` (`form: 'instructions'`). `agent-instructions` filters its inbox on `kind === 'agent-instructions'`, so its `syncInbox` never sees or removes these messages, and the new kind is logged and replayed as a `user` message.
 
 ## Alternatives considered
@@ -28,14 +34,16 @@ To keep the two loaders from managing each other's messages, the injected contex
 
 **Reuse `agent-instructions`' `agent-instructions` source kind for the injected rules.** Rejected. That loader treats any inbox message of that kind as its own workspace context and would reconcile or remove it.
 
+**Reuse the agent `inbox` (as `agent-instructions` does) to deliver mid-turn scoped rules.** Rejected for the always-on path, but the inbox-plus-`pre-step` shape is exactly what `agent-instructions` uses for reconciliation. The scoped-rule contributor instead folds directly into the `agent/pre-step` decision; because the loop emits `agent/pre-step` before every model request (including a tool continuation), folding a newly active scoped rule into the continuation's entering decision reaches the next request without the inbox. The message-source kind isolation keeps the two loaders disjoint.
+
 **Hand-roll a new instruction-filesystem loading pipeline.** Rejected. Duplicating the render, budget, and reconciliation machinery adds surface for little gain; the two Claude rule files are folded once at the first request and deliberately are not reconciled after edits in this increment.
 
 ## Consequences
 
 A session that mounts the plugin sees `.claude/skills` in the catalog alongside DSH roots and gets the two Claude rule files folded into its first request. The change is additive and opt-in: it mounts via a profile `patch` or a preset composition and requires `ctx.skills`, so trees without the skill registry boot unchanged.
 
-The rules contributor is model-visible as a `user` message under a distinct source kind, so it is durable and replayable like other context. Because it is not reconciled after edits, an external change to a Claude rule file mid-session is not re-read until a new turn re-reads at its first request, matching the note's watchdog-free model. `.claude/skills` discovery is also non-watching, matching `skill-filesystem`'s existing limit in that it re-runs on the next catalog refresh rather than at the exact filesystem instant.
+The rules and scoped-rule contributors are model-visible as `user` messages under distinct source kinds (`claude-code`, `claude-rule`), so they are durable and replayable like other context. Because they are not reconciled after edits, an external change to a rule file mid-session is not re-read until a new turn re-reads at its first request, matching the note's watchdog-free model. Scoped rules activate on `read` only (matching Claude Code), so a rule scoped to a file the agent writes rather than reads may not activate. `.claude/skills` discovery is also non-watching, matching `skill-filesystem`'s existing limit in that it re-runs on the next catalog refresh rather than at the exact filesystem instant.
 
 ## Deferred
 
-A skill watcher for the Claude roots, post-edit rule re-reading, additional Claude Code assets (`.claude/rules/*.md`, `.claude/commands`, `.claude/settings.json` hooks, and `.mcp.json`) are deferred and out of scope here.
+A skill watcher for the Claude roots, post-edit rule re-reading, and the remaining Claude Code assets (`.claude/commands`, `.claude/settings.json` hooks, and `.mcp.json`) are deferred and out of scope here.

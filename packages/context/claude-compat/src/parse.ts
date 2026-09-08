@@ -12,9 +12,9 @@
  * @module @deepseek-ai/dsh-claude-compat/parse
  */
 
-import { parse as parseYaml } from 'yaml'
 import type { SkillInvocationPolicy } from '@deepseek-ai/dsh-skill'
 import { isSkillName } from '@deepseek-ai/dsh-skill'
+import { parseYamlFrontmatter } from './frontmatter.ts'
 
 /** A parsed Claude Code skill file body. */
 export interface ParsedClaudeSkill {
@@ -27,47 +27,12 @@ export interface ParsedClaudeSkill {
 }
 
 /**
- * Strip a leading YAML frontmatter block.
- * @param raw - the raw file text.
- * @returns the frontmatter data and the remaining body, or `undefined` when the
- *   file has no closing `---` fence via the required `---` opening line.
- */
-function parseFrontmatter(raw: string): { data: Record<string, unknown>; body: string } | undefined {
-  const firstLineEnd = raw.indexOf('\n')
-  if (firstLineEnd < 0) return undefined
-  const firstLine = raw.slice(0, firstLineEnd).replace(/\r$/, '')
-  if (firstLine !== '---') return undefined
-  const start = firstLineEnd + 1
-  const closing = findClosingFrontmatter(raw, start)
-  if (closing === undefined) return undefined
-  const yaml = raw.slice(start, closing.start)
-  const parsed = parseYaml(yaml) as unknown
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined
-  return { data: parsed as Record<string, unknown>, body: raw.slice(closing.bodyStart) }
-}
-
-function findClosingFrontmatter(raw: string, start: number): { start: number; bodyStart: number } | undefined {
-  let lineStart = start
-  while (lineStart <= raw.length) {
-    const nextNewline = raw.indexOf('\n', lineStart)
-    const lineEnd = nextNewline < 0 ? raw.length : nextNewline
-    const line = raw.slice(lineStart, lineEnd).replace(/\r$/, '')
-    if (line === '---') {
-      return { start: lineStart, bodyStart: nextNewline < 0 ? raw.length : nextNewline + 1 }
-    }
-    if (nextNewline < 0) return undefined
-    lineStart = nextNewline + 1
-  }
-  return undefined
-}
-
-/**
  * Parse a Claude Code skill file into the registry shape.
  * @param raw - the raw file text.
  * @returns the parsed skill, or `undefined` when the file is not a valid skill.
  */
 export function parseClaudeSkill(raw: string): ParsedClaudeSkill | undefined {
-  const parsed = parseFrontmatter(raw)
+  const parsed = parseYamlFrontmatter(raw)
   if (parsed === undefined) return undefined
   const name = stringField(parsed.data, 'name')
   const description = stringField(parsed.data, 'description')

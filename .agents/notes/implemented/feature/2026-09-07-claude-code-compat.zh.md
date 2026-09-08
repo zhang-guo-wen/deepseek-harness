@@ -2,7 +2,7 @@
 
 Status: implemented
 
-English | [中文](2026-09-07-claude-code-compat.zh.md)
+[English](2026-09-07-claude-code-compat.md) | 中文
 
 ## 问题
 
@@ -20,6 +20,12 @@ English | [中文](2026-09-07-claude-code-compat.zh.md)
 
 与技能不同，指令文件没有注册表缝。插件把 `.claude/CLAUDE.md` 与 `~/.claude/CLAUDE.md` 作为增量 instructions-form 上下文贡献，而非改动 `agent-instructions`。它监听 `agent/pre-step`，读取两文件，并折叠进进入决策中最后一个已接收用户消息之后，复用 `agent-instructions` 相同的 `agent/pre-step` waterfall。文件缺失或不可读不是致命错误。
 
+### 作用域规则
+
+`.claude/rules/**`（项目）与 `~/.claude/rules/**`（用户）下的规则以第二种可合并 source kind `claude-rule` 折叠。规则的 YAML frontmatter 可携带 `paths:` glob 列表；无 `paths`（或空列表）的规则始终生效，像 `CLAUDE.md` 一样在首次请求折叠；带 `paths` 的规则是路径作用域的，在 `read` 到匹配某个 glob 的文件后，折叠进随后的请求。glob 相对项目根路径用 `picomatch` 匹配。
+
+路径作用域触发监听 `tools/result` 中成功的 `read`，把匹配的作用域规则在 agent 会话上标记为激活；下一次 `agent/pre-step` 折叠它们。`agent/pre-step` 每回合触发一次，而工具续接步骤不携带新 claim 的消息，因此规则贡献者会把新激活的作用域规则折叠进空进入决策（始终生效的规则仍以非空进入步骤为门槛，避免注入到没有用户提示的回合）。每条规则每次会话至多折叠一次，用按会话的 `WeakMap` 跟踪。
+
 为避免两个加载器互管对方消息，注入的上下文携带新的可合并消息源 `claude-code`（`form: 'instructions'`）。`agent-instructions` 以 `kind === 'agent-instructions'` 过滤其 inbox，因此其 `syncInbox` 永远看不到或移除这些消息，新 kind 作为 `user` 消息被记录与回放。
 
 ## 备选方案
@@ -28,14 +34,16 @@ English | [中文](2026-09-07-claude-code-compat.zh.md)
 
 **复用 `agent-instructions` 的 `agent-instructions` source kind 注入规则。** 否决。那个加载器会把 inbox 中该 kind 的任何消息当作自己的 workspace 上下文，去调和或移除。
 
+**像 `agent-instructions` 那样复用 agent `inbox` 以在回合中投递作用域规则。** 对始终生效路径否决，但 `inbox` 加 `pre-step` 正是 `agent-instructions` 做调和所用的形状。作用域规则贡献者改为直接折叠进 `agent/pre-step` 决策；因为循环在每次模型请求（包括工具续接）前都会发出 `agent/pre-step`，把新激活的作用域规则折叠进续接的进入决策即可到达下一次请求，无需 inbox。source kind 隔离让两个加载器互不相扰。
+
 **手写新的指令文件系统加载管线。** 否决。重复渲染、预算与调和机制只增加表面；两个 Claude 规则文件在首次请求只折叠一次，且在此增量中刻意不做编辑后重调和。
 
 ## 后果
 
 挂载该插件后，会话会在 DSH 根之外看到 `.claude/skills`，并得到折叠进首次请求的两条 Claude 规则文件。改动是增量且可选：通过 profile `patch` 或预设组合挂载，需要 `ctx.skills`，因此没有技能注册表的树仍照常启动。
 
-规则贡献者以独立 source kind 作为 `user` 消息到达模型，因此像其它上下文一样可持久、可回放。因为编辑后不重调和，Claude 规则文件在会话中途的外部改动要等下一次回合的首次请求才重读，符合该 note 无 watchdog 的模型。`.claude/skills` 发现同样不监听，与 `skill-filesystem` 现有限制一致——在下一次目录刷新时重跑，而非在文件系统变化瞬间。
+规则与作用域规则贡献者以独立 source kind（`claude-code`、`claude-rule`）作为 `user` 消息到达模型，因此像其它上下文一样可持久、可回放。因为编辑后不重调和，Claude 规则文件在会话中途的外部改动要等下一次回合的首次请求才重读，符合该 note 无 watchdog 的模型。作用域规则仅以 `read` 触发（与 Claude Code 一致），因此作用域到某个 agent 写而非读的文件上的规则可能不激活。`.claude/skills` 发现同样不监听，与 `skill-filesystem` 现有限制一致——在下一次目录刷新时重跑，而非在文件系统变化瞬间。
 
 ## Deferred
 
-Claude 根目录的技能 watch、编辑后规则重读、其余 Claude Code 资产（`.claude/rules/*.md`、`.claude/commands`、`.claude/settings.json` hooks、`.mcp.json`）在这里都属 defer，不在范围内。
+Claude 根目录的技能 watch、编辑后规则重读，以及其余 Claude Code 资产（`.claude/commands`、`.claude/settings.json` hooks、`.mcp.json`）在这里都属 defer，不在范围内。

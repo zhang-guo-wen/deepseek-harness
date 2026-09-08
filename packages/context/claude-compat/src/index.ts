@@ -5,7 +5,9 @@
  * directory-bundle skills (`<projectRoot>/.claude/skills` and `~/.claude/skills`)
  * appear in the same session catalog as every other skill source, and folds the
  * Claude Code rule files (`.claude/CLAUDE.md` and `~/.claude/CLAUDE.md`) into
- * the first request as their own instruction context.
+ * the first request as their own instruction context. The scoped-rule contributor
+ * also discovers `.claude/rules/**` and `~/.claude/rules/**`, folding always-on
+ * rules at the first request and path-scoped rules when a matching file is read.
  *
  * It also owns the Codex rule contributor (`.codex/AGENTS.md` and
  * `~/.codex/AGENTS.md`) and the single `context-injection` settings namespace
@@ -22,6 +24,7 @@ import type {} from '@deepseek-ai/dsh-skill'
 import { ClaudeCodeSkillProvider, type Config as ProviderConfig } from './provider.ts'
 import { claudeInstructionListener, type InstructionConfig } from './instructions.ts'
 import { codexInstructionListener } from './codex.ts'
+import { claudeRulesListener, type RulesConfig } from './rules.ts'
 import {
   registerContextInjection,
   type ContextInjectionConfig,
@@ -33,8 +36,8 @@ export const name = 'claude-compat'
 /** Services required by this plugin (settings is optional and probed lazily). */
 export const inject = ['skills']
 
-/** Config forwarded to the provider, both instruction contributors, and the namespace. */
-export interface Config extends ProviderConfig, InstructionConfig, ContextInjectionConfig {
+/** Config forwarded to the provider, both instruction contributors, the rule contributor, and the namespace. */
+export interface Config extends ProviderConfig, InstructionConfig, RulesConfig, ContextInjectionConfig {
   /** Codex home; defaults to `$CODEX_HOME` or `~/.codex`. */
   codexHome?: string
 }
@@ -48,6 +51,10 @@ export const Config: Schema<Config> = z.object({
   includeGlobalRoot: z.boolean().default(true),
   includeProjectRule: z.boolean().default(true),
   includeGlobalRule: z.boolean().default(true),
+  includeProjectRules: z.boolean().default(true),
+  includeGlobalRules: z.boolean().default(true),
+  maxRuleSourceBytes: z.number().step(1).min(1).default(1_048_576),
+  maxRuleRenderBytes: z.number().step(1).min(0).default(262_144),
   claude: z.boolean().default(true),
   codex: z.boolean().default(true),
 })
@@ -61,6 +68,15 @@ export function apply(ctx: Context, config: Config = {}): void {
   const flags = registerContextInjection(ctx, config)
   ctx.skills.registerProvider(control => new ClaudeCodeSkillProvider(ctx, control, { ...config, enabled: () => flags().claude }))
   claudeInstructionListener(ctx, config, () => flags().claude)
+  const ruleConfig = {
+    ...config.claudeHome !== undefined ? { claudeHome: config.claudeHome } : {},
+    ...config.projectRootMarkers !== undefined ? { projectRootMarkers: config.projectRootMarkers } : {},
+    ...config.includeProjectRules !== undefined ? { includeProjectRules: config.includeProjectRules } : {},
+    ...config.includeGlobalRules !== undefined ? { includeGlobalRules: config.includeGlobalRules } : {},
+    ...config.maxRuleSourceBytes !== undefined ? { maxRuleSourceBytes: config.maxRuleSourceBytes } : {},
+    ...config.maxRuleRenderBytes !== undefined ? { maxRuleRenderBytes: config.maxRuleRenderBytes } : {},
+  }
+  claudeRulesListener(ctx, ruleConfig, () => flags().claude)
   const codexConfig = {
     ...config.codexHome !== undefined ? { codexHome: config.codexHome } : {},
     ...config.projectRootMarkers !== undefined ? { projectRootMarkers: config.projectRootMarkers } : {},
