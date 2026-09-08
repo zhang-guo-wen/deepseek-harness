@@ -31,10 +31,10 @@
 import { mkdir, open, stat } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
 import { join } from 'node:path'
-import { flock } from 'fs-ext'
 import { SessionAlreadyOwnedError } from '@deepseek-ai/dsh-session-persistence'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { acquireLockHandleWin32, releaseLockHandleWin32 } from './win32.ts'
+import type { flock as FlockFn } from 'fs-ext'
 
 /** Base name of the kernel lock file inside a session's directory. */
 export const LEASE_FILENAME = 'session.lock'
@@ -44,10 +44,22 @@ type HeldLock =
   | { readonly kind: 'posix'; readonly handle: FileHandle }
   | { readonly kind: 'win32'; readonly handle: number }
 
+/** fs-ext's callback flock face, loaded lazily on the POSIX write path only. */
+let flockFace: typeof FlockFn | undefined
+
+/** Load fs-ext's flock face on demand so Windows never evaluates the native addon. */
+async function loadFlock(): Promise<typeof FlockFn> {
+  if (flockFace === undefined) {
+    flockFace = (await import('fs-ext')).flock
+  }
+  return flockFace
+}
+
 /** Promise face over fs-ext's callback flock, pinned to its string-flag overload. */
-function flockAsync(fd: number, flags: 'exnb' | 'un'): Promise<void> {
-  return new Promise((resolve, reject) => {
-    flock(fd, flags, (error) => {
+async function flockAsync(fd: number, flags: 'exnb' | 'un'): Promise<void> {
+  const face = await loadFlock()
+  await new Promise<void>((resolve, reject) => {
+    face(fd, flags, (error) => {
       if (error) reject(error)
       else resolve()
     })
