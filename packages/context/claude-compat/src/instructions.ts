@@ -119,6 +119,9 @@ export function claudeInstructionListener(
   config: InstructionConfig = {},
   isEnabled: () => boolean = () => true,
 ): void {
+  // Inject the rules at most once per session so they reach the model at the
+  // start of a conversation instead of on every request.
+  const injectedSessions = new WeakSet<object>()
   ctx.on('agent/pre-step', async (
     { agent, signal },
     next: () => Promise<PreStepDecision>,
@@ -127,11 +130,14 @@ export function claudeInstructionListener(
     if (!isEnabled()) return decision
     if (decision.kind === 'reject') return decision
     if (decision.messages.length === 0) return decision
-    const cwd = agent.session?.header?.cwd
+    const session = agent.session
+    if (session === undefined || injectedSessions.has(session)) return decision
+    const cwd = session.header?.cwd
     if (cwd === undefined) return decision
     const context = await loadClaudeInstructions(cwd, ctx, config)
     signal.throwIfAborted()
     if (context === undefined) return decision
+    injectedSessions.add(session)
     return injectIntoFirstRequest(decision, context)
   })
 }
