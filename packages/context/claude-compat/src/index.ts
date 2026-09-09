@@ -21,6 +21,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type Schema from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-skill'
+import type SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import { ClaudeCodeSkillProvider, type Config as ProviderConfig } from './provider.ts'
 import { claudeInstructionListener, type InstructionConfig } from './instructions.ts'
 import { codexInstructionListener } from './codex.ts'
@@ -82,4 +83,17 @@ export function apply(ctx: Context, config: Config = {}): void {
     ...config.projectRootMarkers !== undefined ? { projectRootMarkers: config.projectRootMarkers } : {},
   }
   codexInstructionListener(ctx, codexConfig, () => flags().codex)
+  // The user system prompt from the `context-injection` settings namespace is a
+  // real system-prompt section. Its text re-reads the live setting at each
+  // assembly, so a change lands on the next request without reloading; an empty
+  // prompt renders to nothing. The system-prompt service is optional here, so
+  // compositions without it (the minimal loader test) simply skip this section.
+  const systemPrompt = ctx.get('systemPrompt') as SystemPrompt | undefined
+  if (systemPrompt !== undefined) {
+    systemPrompt.section({
+      name: 'context-injection:user-system-prompt',
+      order: 100,
+      text: () => flags().systemPrompt,
+    })
+  }
 }

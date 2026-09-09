@@ -10,6 +10,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { parseClaudeSkill } from '../src/parse.ts'
 import { ClaudeCodeSkillProvider } from '../src/provider.ts'
 import { loadClaudeInstructions, foldContext, injectIntoFirstRequest } from '../src/instructions.ts'
+import { apply } from '../src/index.ts'
 
 const SKILL_MD = `---
 name: my-skill
@@ -164,5 +165,49 @@ describe('injectIntoFirstRequest', () => {
   it('does not inject into an empty enter', () => {
     const decision: PreStepDecision = { kind: 'enter', messages: [] }
     expect(injectIntoFirstRequest(decision, { text: 'x', files: [] })).toBe(decision)
+  })
+})
+
+describe('user system-prompt section', () => {
+  interface Section {
+    name: string
+    order: number
+    text: string | (() => string)
+  }
+
+  /** A minimal plugin context: optional settings + system-prompt services. */
+  function stubCtx(withSystemPrompt: boolean): { ctx: Context; sections: Section[] } {
+    const sections: Section[] = []
+    const settingsScope = {
+      get: () => ({ claude: true, codex: true, systemPrompt: 'user guidance' }),
+      watch: () => () => {},
+    }
+    const ctx = {
+      skills: { registerProvider: () => () => {} },
+      on: () => () => {},
+      inject: (_deps: readonly string[], callback: (scope: { settings: unknown }) => void) => {
+        callback({ settings: { register: () => settingsScope } })
+      },
+      get: (name: string) => name === 'systemPrompt'
+        ? withSystemPrompt ? { section: (section: Section) => { sections.push(section) } } : undefined
+        : undefined,
+    } as unknown as Context
+    return { ctx, sections }
+  }
+
+  it('registers the user system prompt as a live system-prompt section', () => {
+    const { ctx, sections } = stubCtx(true)
+    apply(ctx, {})
+
+    expect(sections).toHaveLength(1)
+    expect(sections[0]?.name).toBe('context-injection:user-system-prompt')
+    expect(typeof sections[0]?.text).toBe('function')
+    expect((sections[0]?.text as () => string)()).toBe('user guidance')
+  })
+
+  it('skips registration when the system-prompt service is absent', () => {
+    const { ctx } = stubCtx(false)
+    // No throw: the section is simply not registered.
+    apply(ctx, {})
   })
 })

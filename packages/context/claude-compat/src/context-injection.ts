@@ -34,12 +34,15 @@ export interface ContextInjectionFlags {
   claude: boolean
   /** Whether Codex rule files are folded into the first request. */
   codex: boolean
+  /** User-authored system prompt embedded at the system level of a session. */
+  systemPrompt: string
 }
 
 /** Schema served to settings clients for the injection preference. */
 export const CONTEXT_INJECTION_SCHEMA: Schema<ContextInjectionFlags> = z.object({
   claude: z.boolean().default(true),
   codex: z.boolean().default(true),
+  systemPrompt: z.string().default(''),
 })
 
 /** Composition-layer defaults for the two toggles when a plugin uses them. */
@@ -96,6 +99,7 @@ export function registerContextInjection(
   const base: ContextInjectionFlags = {
     claude: config.claude ?? true,
     codex: config.codex ?? true,
+    systemPrompt: '',
   }
   let source: InjectionFlagsSource = () => ({ ...base })
   ctx.inject(['settings'], (settingsCtx) => {
