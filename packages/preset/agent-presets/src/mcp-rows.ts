@@ -7,12 +7,16 @@
 
 import { writeComposition } from './authoring.ts'
 import type { AgentPreset } from './preset.ts'
-import type { McpRowConfig } from './types.ts'
 
 /** Module specifier of the MCP client bridge these helpers author. */
 export const MCP_CLIENT_MODULE = '@deepseek-ai/dsh-mcp-client'
 
-export type { McpRowConfig } from './types.ts'
+/** The mcp-client config written into a row (`transport`, `serverName`, ..., `description`). */
+export interface McpRowConfig {
+  serverName: string
+  description?: string
+  [key: string]: unknown
+}
 
 /**
  * Append one `mcp-client` row to a user preset's composition file.
