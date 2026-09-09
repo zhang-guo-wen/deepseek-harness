@@ -28,6 +28,12 @@ The path-scoped trigger listens on `tools/result` for a successful `read` and ma
 
 To keep the two loaders from managing each other's messages, the injected context carries a new merge-extensible message source `claude-code` (`form: 'instructions'`). `agent-instructions` filters its inbox on `kind === 'agent-instructions'`, so its `syncInbox` never sees or removes these messages, and the new kind is logged and replayed as a `user` message.
 
+### MCP composition authoring
+
+The plugin owns the `claudeCompatMcp` Typert Remote. Its request objects distinguish a global Loader composition from a user-owned agent preset, a Loader row id from the MCP `serverName`, and the transport specification from the display description. Descriptions remain in `context-injection.mcpDescriptions`; the `mcp-client` row contains only connection fields. The browser settings section surfaces these operations as Add / Edit / Enable-Disable controls, all routed through the same Remote.
+
+Preset add, edit, and disable operations resolve the preset through the optional `agentPresets` service, reject shipped presets, validate the Loader entry-list dialect, and commit a locked atomic YAML rewrite. A direct unpatched global Include uses `ctx.loader.update` or its Include child tree so active Loader lifecycle follows the durable row. Layered profile roots are refused because Include write-back would flatten bundle and user patch layers. A committed preset edit affects new standing mounts; an already mounted preset keeps its current generation.
+
 ## Alternatives considered
 
 **Extend `agent-instructions` to accept nested candidates (`instructionFileCandidates` containing `.claude/CLAUDE.md`).** Rejected. Its candidate filter deliberately drops entries containing a separator, its test suite pins that behavior, and the workspace-context note explicitly defers directory-rule systems to their own precedence and trust design. Relaxing the boundary would fight a shipped, tested decision.

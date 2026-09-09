@@ -28,6 +28,12 @@ Status: implemented
 
 为避免两个加载器互管对方消息，注入的上下文携带新的可合并消息源 `claude-code`（`form: 'instructions'`）。`agent-instructions` 以 `kind === 'agent-instructions'` 过滤其 inbox，因此其 `syncInbox` 永远看不到或移除这些消息，新 kind 作为 `user` 消息被记录与回放。
 
+### MCP 组合写作
+
+本插件拥有 `claudeCompatMcp` Typert Remote。其请求对象区分全局 Loader 组合与用户所有的 agent 预设、Loader 行 id 与 MCP `serverName`，并区分传输规范与显示描述。描述保留在 `context-injection.mcpDescriptions`；`mcp-client` 行只包含连接字段。浏览器设置页把这些操作暴露为「新增 / 编辑 / 启用–禁用」控件，全部经由同一个 Remote 路由。
+
+预设的增、改、禁用通过可选的 `agentPresets` 服务解析预设，拒绝 shipped 预设，校验 Loader 行列表方言，并以加锁的原子 YAML 重写提交。直接且无 patch 的全局 Include 通过 `ctx.loader.update` 或其 Include 子树写入，使活动 Loader 生命周期跟随持久行。分层 profile 根会被拒绝，因为 Include 写回会把 bundle 与用户 patch 层压平。已提交的预设修改只影响新的 standing mount；已经挂载的预设保持当前 generation。
+
 ## 备选方案
 
 **扩展 `agent-instructions` 接受嵌套候选（`instructionFileCandidates` 含 `.claude/CLAUDE.md`）。** 否决。其候选过滤刻意丢弃含分隔符的条目，其单测钉死了该行为，且 workspace-context note 明确把目录规则系统 defer 到各自的优先级与信任设计。放宽边界是在对抗一个已交付、已测试的决策。

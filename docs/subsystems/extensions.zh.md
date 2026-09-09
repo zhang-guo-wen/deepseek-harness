@@ -12,6 +12,43 @@ extensions 子系统允许 agent（智能体）定义带版本的 Cordis 包、�
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.zh.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
 
+<a id="ctxclaudecompatmcp--claudecompatmcp"></a>
+
+### `ctx.claudeCompatMcp` — `ClaudeCompatMcp`
+
+Host service behind the `claudeCompatMcp` Remote namespace. Preset mutations update the resolved user's composition file; global mutations use the one unpatched root Include so Loader lifecycle and file state remain aligned.
+
+```ts cordis-catalog
+/**
+ * Add one MCP client row to a global or user preset composition.
+ * @param request - target, row identity, server namespace, and transport spec.
+ * @returns the redacted row identity after the file-backed mutation commits.
+ * @throws a typed MCP error when the target is unavailable, read-only,
+ * malformed, duplicated, or not an MCP composition row.
+ */
+@Remote('addMcp') async addMcp(request: AddMcpRequest): Promise<McpMutationResult>
+
+/**
+ * Replace one MCP client row's connection configuration.
+ * @param request - target row, new server namespace, and transport spec.
+ * @returns the redacted row identity after the mutation commits.
+ * @throws a typed MCP error when the target is unavailable, read-only,
+ * malformed, duplicated, or not an MCP composition row.
+ */
+@Remote('editMcp') async editMcp(request: EditMcpRequest): Promise<McpMutationResult>
+
+/**
+ * Enable or disable one MCP client row.
+ * @param request - target row and the requested disabled state.
+ * @returns the redacted row identity after the mutation commits.
+ * @throws a typed MCP error when the target is unavailable, read-only,
+ * malformed, or not an MCP composition row.
+ */
+@Remote('disableMcp') async disableMcp(request: DisableMcpRequest): Promise<McpMutationResult>
+```
+
+Source: [`packages/context/claude-compat/src/mcp-remote.ts`](../../packages/context/claude-compat/src/mcp-remote.ts)
+
 <a id="ctxcordisinspect--cordisinspectregistryservice"></a>
 
 ### `ctx.cordisInspect` — `CordisInspectRegistryService`

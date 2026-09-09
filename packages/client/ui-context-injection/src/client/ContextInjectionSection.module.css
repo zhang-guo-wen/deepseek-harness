@@ -167,6 +167,13 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
+.mcpToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .mcpList {
   display: flex;
   flex-direction: column;
@@ -226,6 +233,35 @@
   flex: none;
 }
 
+.mcpActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.mcpAction {
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  padding: 3px 9px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 11.5px;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.mcpAction:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.mcpAction:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .badge {
   font-size: 11px;
   padding: 2px 8px;
@@ -281,6 +317,83 @@
   margin: 0;
   font-size: 13px;
   color: var(--dsw-alias-label-tertiary);
+}
+
+.mcpActionError {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--dsw-alias-state-error-primary);
+}
+
+/* ---- MCP editor modal ---- */
+.mcpEditorContent {
+  min-height: 0;
+}
+
+.mcpForm {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.formField {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.formLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.formSelect {
+  width: 100%;
+  box-sizing: border-box;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: 8px;
+  padding: 7px 10px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.formTextarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: 8px;
+  padding: 7px 10px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font-family: var(--ds-font-family-code);
+  font-size: 12.5px;
+  line-height: 18px;
+  outline: none;
+}
+
+.formTextarea:focus,
+.formSelect:focus {
+  border-color: var(--dsw-alias-state-business-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--dsw-alias-state-business-primary) 18%, transparent);
+}
+
+.formError {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.formActions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .unavailable {

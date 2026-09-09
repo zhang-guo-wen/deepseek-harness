@@ -594,6 +594,34 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'claudeCompatMcp',
+    summary: 'Host service behind the `claudeCompatMcp` Remote namespace.',
+    description: 'Host service behind the `claudeCompatMcp` Remote namespace. Preset mutations update the resolved user\'s composition file; global mutations use the one unpatched root Include so Loader lifecycle and file state remain aligned.',
+    methods: [
+      {
+        signature: '@Remote(\'addMcp\') async addMcp(request: AddMcpRequest): Promise<McpMutationResult>',
+        description: 'Add one MCP client row to a global or user preset composition.',
+        parameters: [{ name: 'request', description: 'target, row identity, server namespace, and transport spec.' }],
+        returns: 'the redacted row identity after the file-backed mutation commits.',
+        throws: ['a typed MCP error when the target is unavailable, read-only, malformed, duplicated, or not an MCP composition row.'],
+      },
+      {
+        signature: '@Remote(\'editMcp\') async editMcp(request: EditMcpRequest): Promise<McpMutationResult>',
+        description: 'Replace one MCP client row\'s connection configuration.',
+        parameters: [{ name: 'request', description: 'target row, new server namespace, and transport spec.' }],
+        returns: 'the redacted row identity after the mutation commits.',
+        throws: ['a typed MCP error when the target is unavailable, read-only, malformed, duplicated, or not an MCP composition row.'],
+      },
+      {
+        signature: '@Remote(\'disableMcp\') async disableMcp(request: DisableMcpRequest): Promise<McpMutationResult>',
+        description: 'Enable or disable one MCP client row.',
+        parameters: [{ name: 'request', description: 'target row and the requested disabled state.' }],
+        returns: 'the redacted row identity after the mutation commits.',
+        throws: ['a typed MCP error when the target is unavailable, read-only, malformed, or not an MCP composition row.'],
+      },
+    ],
+  },
+  {
     key: 'clientModules',
     summary: 'The web plugin table service: incremental `dsh.client` scan + wire composition + bundle route + index injection rows.',
     description: 'The web plugin table service: incremental `dsh.client` scan + wire composition + bundle route + index injection rows. Construction runs the activation scan synchronously — a malformed declaration or missing bundle among the already-loaded entries aggregates into one loud throw (FAILED fiber; the boot activation audit reports it).',
@@ -3540,6 +3568,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface AdapterRegistrationHandle {\n    (): void;\n    replace(providers: string[]): void;\n}',
   },
   {
+    name: 'AddMcpRequest',
+    declaration: 'export interface AddMcpRequest {\n    readonly target: McpTarget;\n    readonly entryId?: string;\n    readonly serverName: string;\n    readonly spec: McpSpec;\n}',
+  },
+  {
     name: 'AdmittedPromptContentPart',
     declaration: 'export type AdmittedPromptContentPart = {\n    readonly type: \'text\';\n    readonly text: string;\n} | {\n    readonly type: \'image\';\n    readonly attachment: ImageAttachmentRef;\n} | {\n    readonly type: \'file\';\n    readonly attachment: FileAttachmentRef;\n};',
   },
@@ -4080,6 +4112,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface DirectoryRegistrationHandle {\n    (): void;\n    replace(entries: readonly LlmConfigurableProvider[]): void;\n}',
   },
   {
+    name: 'DisableMcpRequest',
+    declaration: 'export interface DisableMcpRequest {\n    readonly target: McpTarget;\n    readonly entryId: string;\n    readonly disabled: boolean;\n}',
+  },
+  {
     name: 'Domain',
     declaration: 'export interface Domain<S extends DomainSpec> {\n    readonly name: string;\n    readonly global: DomainGlobalHandleOf<S>;\n    table<N extends keyof S[\'tables\'] & string>(name: N): KvTable<TableKeyOf<S, N>, TableValueOf<S, N>>;\n    close(): Promise<void>;\n}',
   },
@@ -4150,6 +4186,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'EditGoalRequest',
     declaration: 'export interface EditGoalRequest {\n    readonly objective?: string;\n    readonly maxGoalRounds?: number;\n}',
+  },
+  {
+    name: 'EditMcpRequest',
+    declaration: 'export interface EditMcpRequest {\n    readonly target: McpTarget;\n    readonly entryId: string;\n    readonly serverName: string;\n    readonly spec: McpSpec;\n}',
   },
   {
     name: 'EncodedFileAttachment',
@@ -4570,6 +4610,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ManualCompactAgentContext',
     declaration: 'export interface ManualCompactAgentContext extends CompactionAgentContext {\n    runMaintenance<T>(task: (signal: AbortSignal) => Promise<T>): Promise<T>;\n}',
+  },
+  {
+    name: 'McpMutationResult',
+    declaration: 'export interface McpMutationResult {\n    readonly target: McpTarget;\n    readonly entryId: string;\n    readonly serverName: string;\n    readonly disabled: boolean;\n}',
+  },
+  {
+    name: 'McpSpec',
+    declaration: 'export type McpSpec = {\n    readonly type: \'stdio\';\n    readonly command: string;\n    readonly args?: readonly string[];\n    readonly env?: Readonly<Record<string, string>>;\n    readonly cwd?: string;\n} | {\n    readonly type: \'streamable-http\' | \'http\' | \'sse\';\n    readonly url: string;\n    readonly headers?: Readonly<Record<string, string>>;\n};',
+  },
+  {
+    name: 'McpTarget',
+    declaration: 'export type McpTarget = {\n    readonly scope: \'global\';\n} | {\n    readonly scope: \'preset\';\n    readonly agentPreset: string;\n};',
   },
   {
     name: 'Message',

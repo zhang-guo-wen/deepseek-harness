@@ -21,8 +21,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type Schema from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-skill'
-import type SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import { ClaudeCodeSkillProvider, type Config as ProviderConfig } from './provider.ts'
+import { ClaudeCompatMcp } from './mcp-remote.ts'
+import { ClaudeCodeSkillProvider } from './provider.ts'
 import { claudeInstructionListener, type InstructionConfig } from './instructions.ts'
 import { codexInstructionListener } from './codex.ts'
 import { claudeRulesListener, type RulesConfig } from './rules.ts'
@@ -34,14 +34,31 @@ import {
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'claude-compat'
 
-/** Services required by this plugin (settings is optional and probed lazily). */
+/** Services required by this plugin; the MCP Remote is mounted only when Loader is present. */
 export const inject = ['skills']
 
 /** Config forwarded to the provider, both instruction contributors, the rule contributor, and the namespace. */
-export interface Config extends ProviderConfig, InstructionConfig, RulesConfig, ContextInjectionConfig {
+export interface Config extends InstructionConfig, RulesConfig, ContextInjectionConfig {
+  /** Unique provider name. Defaults to `claude-code`. */
+  providerName?: string
+  /** Claude Code home; defaults to `$CLAUDE_HOME` or `~/.claude`. */
+  claudeHome?: string
+  /** Directory entries that identify the project root while walking upward. */
+  projectRootMarkers?: string[]
+  /** Whether the project `.claude/skills` root is scanned. Defaults to true. */
+  includeProjectRoot?: boolean
+  /** Whether the user `~/.claude/skills` root is scanned. Defaults to true. */
+  includeGlobalRoot?: boolean
+  /** Live gate used by the provider; defaults to always-on. */
+  enabled?: () => boolean
   /** Codex home; defaults to `$CODEX_HOME` or `~/.codex`. */
   codexHome?: string
 }
+
+export type * from './types.ts'
+export { ClaudeCompatMcp } from './mcp-remote.ts'
+export { assertServerName, mcpEntryConfig, specFromEntryConfig } from './mcp-config.ts'
+export type { McpEntryConfig, McpTransportConfig } from './mcp-config.ts'
 
 export const Config: Schema<Config> = z.object({
   providerName: z.string().min(1).default('claude-code'),
@@ -65,9 +82,11 @@ export const Config: Schema<Config> = z.object({
  * The `context-injection` namespace supplies the `claude`/`codex` master
  * toggles; the plugin `config` supplies the composition base and default.
  */
-export function apply(ctx: Context, config: Config = {}): void {
+export async function apply(ctx: Context, config: Config = {}): Promise<void> {
   const flags = registerContextInjection(ctx, config)
-  ctx.skills.registerProvider(control => new ClaudeCodeSkillProvider(ctx, control, { ...config, enabled: () => flags().claude }))
+  ctx.skills.registerProvider(control => new ClaudeCodeSkillProvider(
+    ctx, control, Object.assign({}, config, { enabled: () => flags().claude }),
+  ))
   claudeInstructionListener(ctx, config, () => flags().claude)
   const ruleConfig = {
     ...config.claudeHome !== undefined ? { claudeHome: config.claudeHome } : {},
@@ -83,12 +102,15 @@ export function apply(ctx: Context, config: Config = {}): void {
     ...config.projectRootMarkers !== undefined ? { projectRootMarkers: config.projectRootMarkers } : {},
   }
   codexInstructionListener(ctx, codexConfig, () => flags().codex)
+  if (ctx.get('loader') !== undefined) {
+    await ctx.plugin(ClaudeCompatMcp)
+  }
   // The user system prompt from the `context-injection` settings namespace is a
   // real system-prompt section. Its text re-reads the live setting at each
   // assembly, so a change lands on the next request without reloading; an empty
   // prompt renders to nothing. The system-prompt service is optional here, so
   // compositions without it (the minimal loader test) simply skip this section.
-  const systemPrompt = ctx.get('systemPrompt') as SystemPrompt | undefined
+  const systemPrompt = ctx.get('systemPrompt')
   if (systemPrompt !== undefined) {
     systemPrompt.section({
       name: 'context-injection:user-system-prompt',

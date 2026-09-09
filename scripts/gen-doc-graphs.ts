@@ -193,6 +193,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Projects the user-settings seam onto the generated Remote namespace: the read is always redacted and every refusal is classified here, not on the seam Definition.',
   },
   {
+    key: 'claudeCompatMcp',
+    pkg: 'claude-compat',
+    title: 'Claude-compatible MCP authoring Remote',
+    mode: 'core',
+    consumers: ['api-remotes'],
+    note: 'Owns validated global and user-preset MCP row mutations, locked source-file write-back, and typed refusal mapping without placing display descriptions in connection configuration.',
+  },
+  {
     key: 'workspaceFiles',
     pkg: 'api-workspace-files',
     title: 'Host workspace file Remote service',

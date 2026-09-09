@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ContextInjectionSection } from '../src/client/ContextInjectionSection.tsx'
 import type { ContextInjectionSectionProps } from '../src/client/ContextInjectionSection.tsx'
 import type { ContextInjectionSectionState, McpServer } from '../src/client/settings-controller.ts'
 import { en, type ContextInjectionSectionKey } from '../src/client/locales.ts'
+import type { AddMcpRequest, DisableMcpRequest, EditMcpRequest } from '@deepseek-ai/dsh-api-remotes/client'
 
 afterEach(cleanup)
 
@@ -16,15 +17,15 @@ const t = ((key: ContextInjectionSectionKey, params?: Record<string, string>): s
 
 // One row per status branch so the mapping helpers are fully exercised.
 const SAMPLE_MCPS: readonly McpServer[] = [
-  { serverName: 'engram', scope: 'global', presetId: undefined, enabled: true, fiberPhase: 'active' },
-  { serverName: 'memorix', scope: 'global', presetId: undefined, enabled: false, fiberPhase: null },
-  { serverName: 'github', scope: 'preset', presetId: 'standard', enabled: 'conditional', fiberPhase: null },
-  { serverName: 'planner', scope: 'global', presetId: undefined, enabled: true, fiberPhase: null },
-  { serverName: 'ddb', scope: 'preset', presetId: 'standard', enabled: true, fiberPhase: 'pending' },
-  { serverName: 'web', scope: 'global', presetId: undefined, enabled: true, fiberPhase: 'loading' },
-  { serverName: 'search', scope: 'global', presetId: undefined, enabled: true, fiberPhase: 'failed' },
-  { serverName: 'old', scope: 'global', presetId: undefined, enabled: true, fiberPhase: 'unloading' },
-  { serverName: 'edge', scope: 'preset', presetId: undefined, enabled: true, fiberPhase: 'pending' },
+  { serverName: 'engram', entryId: 'include:engram', scope: 'global', presetId: undefined, enabled: true, fiberPhase: 'active' },
+  { serverName: 'memorix', entryId: 'include:memorix', scope: 'global', presetId: undefined, enabled: false, fiberPhase: null },
+  { serverName: 'github', entryId: 'github', scope: 'preset', presetId: 'standard', enabled: 'conditional', fiberPhase: null },
+  { serverName: 'planner', entryId: 'include:planner', scope: 'global', presetId: undefined, enabled: true, fiberPhase: null },
+  { serverName: 'ddb', entryId: 'ddb', scope: 'preset', presetId: 'standard', enabled: true, fiberPhase: 'pending' },
+  { serverName: 'web', entryId: 'include:web', scope: 'global', presetId: undefined, enabled: true, fiberPhase: 'loading' },
+  { serverName: 'search', entryId: 'include:search', scope: 'global', presetId: undefined, enabled: true, fiberPhase: 'failed' },
+  { serverName: 'old', entryId: 'include:old', scope: 'global', presetId: undefined, enabled: true, fiberPhase: 'unloading' },
+  { serverName: 'edge', entryId: 'edge', scope: 'preset', presetId: undefined, enabled: true, fiberPhase: 'pending' },
 ]
 
 function makeProps(
@@ -35,6 +36,9 @@ function makeProps(
   toggle: ReturnType<typeof vi.fn>
   updateSystemPrompt: ReturnType<typeof vi.fn>
   updateMcpDescription: ReturnType<typeof vi.fn>
+  addMcp: ReturnType<typeof vi.fn>
+  editMcp: ReturnType<typeof vi.fn>
+  disableMcp: ReturnType<typeof vi.fn>
 } {
   const snapshot: ContextInjectionSectionState = {
     available: true, writable: true, claude: true, codex: true, systemPrompt: '', mcpDescriptions: {}, ...state,
@@ -42,15 +46,21 @@ function makeProps(
   const toggle = vi.fn()
   const updateSystemPrompt = vi.fn()
   const updateMcpDescription = vi.fn()
+  const addMcp = vi.fn<(request: AddMcpRequest) => Promise<unknown>>()
+  const editMcp = vi.fn<(request: EditMcpRequest) => Promise<unknown>>()
+  const disableMcp = vi.fn<(request: DisableMcpRequest) => Promise<unknown>>()
   const props = {
     t,
     useContextInjection: (selector: (value: ContextInjectionSectionState) => unknown) => selector(snapshot),
     toggle,
     updateSystemPrompt,
     updateMcpDescription,
+    addMcp,
+    editMcp,
+    disableMcp,
     mcps,
   } as unknown as ContextInjectionSectionProps
-  return { props, toggle, updateSystemPrompt, updateMcpDescription }
+  return { props, toggle, updateSystemPrompt, updateMcpDescription, addMcp, editMcp, disableMcp }
 }
 
 describe('ContextInjectionSection', () => {
@@ -187,5 +197,122 @@ describe('ContextInjectionSection', () => {
 
     expect(screen.getByRole('textbox')).toHaveProperty('disabled', true)
     expect(screen.getAllByRole('switch')[0]).toHaveProperty('disabled', true)
+  })
+
+  it('opens the Add dialog and submits an addMcp request', async () => {
+    const { props, addMcp } = makeProps()
+    render(<ContextInjectionSection {...props} />)
+    fireEvent.click(screen.getByRole('tab', { name: t('tab.mcp') }))
+    await screen.findByText('engram')
+
+    fireEvent.click(screen.getByRole('button', { name: t('mcp.add') }))
+    expect(screen.getByText(t('mcp.form.addTitle'))).toBeTruthy()
+
+    fireEvent.change(screen.getByLabelText(t('mcp.form.serverName')), { target: { value: 'context7' } })
+    fireEvent.change(screen.getByLabelText(t('mcp.form.command')), { target: { value: 'engram' } })
+    fireEvent.click(screen.getByRole('button', { name: t('mcp.form.save') }))
+
+    await waitFor(() => {
+      expect(addMcp).toHaveBeenCalledWith({
+        target: { scope: 'global' },
+        serverName: 'context7',
+        spec: { type: 'stdio', command: 'engram' },
+      })
+    })
+  })
+
+  it('opens the Edit dialog prefilled and submits an editMcp request', async () => {
+    const { props, editMcp } = makeProps()
+    render(<ContextInjectionSection {...props} />)
+    fireEvent.click(screen.getByRole('tab', { name: t('tab.mcp') }))
+    await screen.findByText('engram')
+
+    const row = screen.getByText('engram').closest('[data-mcp-name="engram"]') as HTMLElement
+    fireEvent.click(within(row).getByRole('button', { name: t('mcp.edit') }))
+    expect(screen.getByText(t('mcp.form.editTitle'))).toBeTruthy()
+    expect(screen.getByLabelText(t('mcp.form.serverName'))).toHaveProperty('value', 'engram')
+
+    fireEvent.change(screen.getByLabelText(t('mcp.form.command')), { target: { value: 'engram' } })
+    fireEvent.click(screen.getByRole('button', { name: t('mcp.form.save') }))
+
+    await waitFor(() => {
+      expect(editMcp).toHaveBeenCalledWith({
+        target: { scope: 'global' },
+        entryId: 'include:engram',
+        serverName: 'engram',
+        spec: { type: 'stdio', command: 'engram' },
+      })
+    })
+  })
+
+  it('toggles a row off through the enable/disable switch', async () => {
+    const { props, disableMcp } = makeProps()
+    render(<ContextInjectionSection {...props} />)
+    fireEvent.click(screen.getByRole('tab', { name: t('tab.mcp') }))
+    await screen.findByText('engram')
+
+    const row = screen.getByText('engram').closest('[data-mcp-name="engram"]') as HTMLElement
+    const switchEl = within(row).getByRole('switch')
+    expect(switchEl.getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(switchEl)
+
+    await waitFor(() => {
+      expect(disableMcp).toHaveBeenCalledWith({
+        target: { scope: 'global' },
+        entryId: 'include:engram',
+        disabled: true,
+      })
+    })
+  })
+
+  it('toggles a disabled row back on through the switch', async () => {
+    const disabledMcps = () => Promise.resolve([
+      { serverName: 'memorix', entryId: 'include:memorix', scope: 'global' as const, presetId: undefined, enabled: false, fiberPhase: null },
+    ])
+    const { props, disableMcp } = makeProps({}, disabledMcps)
+    render(<ContextInjectionSection {...props} />)
+    fireEvent.click(screen.getByRole('tab', { name: t('tab.mcp') }))
+    await screen.findByText('memorix')
+
+    const row = screen.getByText('memorix').closest('[data-mcp-name="memorix"]') as HTMLElement
+    const switchEl = within(row).getByRole('switch')
+    expect(switchEl.getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(switchEl)
+
+    await waitFor(() => {
+      expect(disableMcp).toHaveBeenCalledWith({
+        target: { scope: 'global' },
+        entryId: 'include:memorix',
+        disabled: false,
+      })
+    })
+  })
+
+  it('surfaces the Host error when a toggle rejects', async () => {
+    const { props, disableMcp } = makeProps()
+    disableMcp.mockRejectedValueOnce(new Error('mcp/read-only: cannot persist'))
+    render(<ContextInjectionSection {...props} />)
+    fireEvent.click(screen.getByRole('tab', { name: t('tab.mcp') }))
+    await screen.findByText('engram')
+
+    const row = screen.getByText('engram').closest('[data-mcp-name="engram"]') as HTMLElement
+    fireEvent.click(within(row).getByRole('switch'))
+
+    expect((await screen.findByRole('alert')).textContent).toContain('mcp/read-only: cannot persist')
+  })
+
+  it('shows the Host error when an edit submission rejects', async () => {
+    const { props, editMcp } = makeProps()
+    editMcp.mockRejectedValueOnce(new Error('mcp/invalid: bad spec'))
+    render(<ContextInjectionSection {...props} />)
+    fireEvent.click(screen.getByRole('tab', { name: t('tab.mcp') }))
+    await screen.findByText('engram')
+
+    const row = screen.getByText('engram').closest('[data-mcp-name="engram"]') as HTMLElement
+    fireEvent.click(within(row).getByRole('button', { name: t('mcp.edit') }))
+    fireEvent.change(screen.getByLabelText(t('mcp.form.command')), { target: { value: 'engram' } })
+    fireEvent.click(screen.getByRole('button', { name: t('mcp.form.save') }))
+
+    expect((await screen.findByRole('alert')).textContent).toContain('mcp/invalid: bad spec')
   })
 })

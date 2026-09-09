@@ -1,5 +1,5 @@
 ---
-description: "DeepSeek Harness 的 Claude Code 兼容：发现 .claude/skills 并加载 CLAUDE.md 规则。"
+description: "DeepSeek Harness 的 Claude Code 兼容：发现 .claude/skills、加载 CLAUDE.md 规则并编写 MCP 行。"
 kind: "package-reference"
 ---
 
@@ -7,24 +7,24 @@ kind: "package-reference"
 
 [English](README.md) | 中文
 
-## 概要
+## 概述
 
-Claude Code 把技能放在 `<root>/.claude/skills/<name>/SKILL.md`，把规则放在 `CLAUDE.md`，并把作用域规则放在 `.claude/rules/**` 下的 markdown 文件。本包让 Harness 三者都能读：在共享的技能注册表（`dsh-skill`）上再注册一个技能 provider，使 `.claude/skills` 进入会话目录；把项目 `.claude/CLAUDE.md` 与用户全局 `~/.claude/CLAUDE.md` 折叠进首次请求，作为独立的 instructions-form 上下文；并折叠 `.claude/rules/**` —— 带 `paths:` 作用域的规则在读取匹配文件时折叠，否则在首次请求折叠。
+Claude Code 把技能放在 `<root>/.claude/skills/<name>/SKILL.md`，把规则放在 `CLAUDE.md`，并把作用域规则放在 `.claude/rules/**` 下的 markdown 文件。本包让 Harness 三者都能读：在共享的技能注册表（`dsh-skill`）上再注册一个技能 provider，使 `.claude/skills` 进入会话目录；把项目 `.claude/CLAUDE.md` 与用户全局 `~/.claude/CLAUDE.md` 折叠进首次请求，作为独立的 instructions-form 上下文；并折叠 `.claude/rules/**` —— 带 `paths:` 作用域的规则在读取匹配文件时折叠，否则在首次请求折叠。本包还拥有 `claudeCompatMcp` Remote，用于编写全局与 agent 预设的 MCP 行。
 
 ## 目录
 
 - [使用本包](#use-this-package)
 - [理解实现](#understand-the-implementation)
 - [模型体验](#model-experience)
-- [已知限制与待办](#known-limitations-and-deferred-work)
-- [开发说明](#dev-note)
+- [已知限制与延期工作](#known-limitations-and-deferred-work)
+- [开发备注](#dev-note)
 
 -----
 
 <a id="use-this-package"></a>
 ## 使用本包
 
-与技能注册表一起挂载；需要 `ctx.skills`。用 profile 的 `patch` 或预设组合像其他插件一样插入即可。
+与技能注册表一起挂载；需要 `ctx.skills`。`ctx.loader` 可用时才会挂载 MCP Remote，agent 预设写作还需要可选的 `agentPresets` 服务。用 profile 的 `patch` 或预设组合像其他插件一样插入即可。
 
 ```yaml
 - name: '@deepseek-ai/dsh-skill'
@@ -62,6 +62,12 @@ Claude Code 把技能放在 `<root>/.claude/skills/<name>/SKILL.md`，把规则�
 
 `.claude/rules/**`（项目）与 `~/.claude/rules/**`（用户）下的规则以 `claude-rule` message-source kind 折叠。YAML frontmatter 带 `paths:` glob 列表的规则是路径作用域的：在 `read` 到匹配某个 glob 的文件后，折叠进随后的请求。无 `paths`（或空列表）的规则始终生效，像 `CLAUDE.md` 一样在首次请求折叠。glob 相对项目根路径匹配；路径作用域触发使用 Harness 的 `read` 工具，任一匹配规则每次会话至多折叠一次。
 
+### MCP 组合
+
+`claudeCompatMcp` Remote 为每个操作使用一个请求对象，并暴露 `addMcp`、`editMcp` 与 `disableMcp`。请求区分全局 Loader 组合与用户所有的 agent 预设、Loader 行 id 与 MCP `serverName`，以及 stdio 或 HTTP 传输规范。显示描述仍存于 `context-injection.mcpDescriptions`；MCP 连接行不会存储描述。
+
+预设修改仅允许受信任的用户预设，并使用 Loader 行列表方言执行加锁的原子读-改-写，因此 `!!js` 表达式保持有效。直接且无 patch 的全局 Include 通过 Loader 更新写入。分层 profile 根会被拒绝，因为 Include 写回会把 bundle 与用户 patch 层压平。修改预设文件不会改变已经挂载的 standing preset；新的挂载才会读取已提交文件。
+
 -----
 
 <a id="understand-the-implementation"></a>
@@ -86,6 +92,9 @@ Claude Code 把技能放在 `<root>/.claude/skills/<name>/SKILL.md`，把规则�
 | [`src/frontmatter.ts`](src/frontmatter.ts) | 技能与规则共用的 YAML frontmatter 解析 |
 | [`src/instructions.ts`](src/instructions.ts) | Claude Code 规则发现与 pre-step 注入 |
 | [`src/rules.ts`](src/rules.ts) | `.claude/rules/**` 发现、`paths:` 匹配与读触发折叠 |
+| [`src/mcp-remote.ts`](src/mcp-remote.ts) | `claudeCompatMcp` Remote 与全局/预设行修改 |
+| [`src/mcp-authoring.ts`](src/mcp-authoring.ts) | 预设 YAML 校验、加锁与 Loader 方言原子写回 |
+| [`src/types.ts`](src/types.ts) | 客户端安全的 MCP 请求、结果与 Remote 错误详情 |
 | — | 未发布 run-time invariant 伴生；本包在注册表与消息源契约之外没有独立事件序列或可变数据关系。 |
 
 </details>
@@ -133,7 +142,7 @@ Instructions from: .claude/rules/api.md
 
 仅追加；折叠规则跟随可复用请求前缀，不会使既有 KV 缓存条目失效。
 
-## 已知限制与待办
+## 已知限制与延期工作
 
 <a id="known-limitations-and-deferred-work"></a>
 
@@ -143,9 +152,12 @@ Instructions from: .claude/rules/api.md
 - **用户级路径规则同样按读触发折叠** — 参考实现静默忽略 `~/.claude/rules` 路径规则；本包对项目与用户两棵树都折叠（各自至多一次）。
 - **项目范围是最接近的 `.git` 祖先** — 无该标记的工作区回退到传入的 cwd。
 - **畸形条目静默消失** — 无有效 frontmatter 的 `.claude/skills` 文件被跳过，不会出现在目录里。
+- **分层全局根对 MCP 编写是只读的** — 由 bundle 或用户 patch 层组合的 profile 需要持久层写入器，Remote 才能安全修改；直接 Include 写入器会拒绝压平这些层。
+- **预设写入会经过 YAML round-trip** — 注释与源码格式不保留，但 Loader 的 `!!js` 方言会保留。
+- **本增量只有 Remote 行控件** — 设置页可以展示和编辑描述，增/改/禁用由生成的 `claudeCompatMcp` Client namespace 调用方使用。
 
 <a id="dev-note"></a>
-### 开发说明
+### 开发备注
 
 <details>
 <summary>维护者工作上下文——点击展开</summary>

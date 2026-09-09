@@ -1,5 +1,5 @@
 ---
-description: "Claude Code compatibility for the DeepSeek Harness: discover .claude/skills and load CLAUDE.md rules."
+description: "Claude Code compatibility for the DeepSeek Harness: discover .claude/skills, load CLAUDE.md rules, and author MCP rows."
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Claude Code keeps skills as `<root>/.claude/skills/<name>/SKILL.md`, rules in `CLAUDE.md`, and scoped rules as markdown files under `.claude/rules/**`. This package makes the harness read all three. It registers one more skill provider on the shared registry (`dsh-skill`) so `.claude/skills` appears in the session catalog next to DSH's own roots; it folds the project `.claude/CLAUDE.md` and the user-global `~/.claude/CLAUDE.md` into the first request as their own instructions-form context; and it folds `.claude/rules/**` — a `paths:`-scoped rule when a matching file is read, otherwise at the first request.
+Claude Code keeps skills as `<root>/.claude/skills/<name>/SKILL.md`, rules in `CLAUDE.md`, and scoped rules as markdown files under `.claude/rules/**`. This package makes the harness read all three. It registers one more skill provider on the shared registry (`dsh-skill`) so `.claude/skills` appears in the session catalog next to DSH's own roots; it folds the project `.claude/CLAUDE.md` and the user-global `~/.claude/CLAUDE.md` into the first request as their own instructions-form context; and it folds `.claude/rules/**` — a `paths:`-scoped rule when a matching file is read, otherwise at the first request. The package also owns the `claudeCompatMcp` Remote for authoring global and agent-preset MCP rows.
 
 ## Table of Contents
 
@@ -24,7 +24,7 @@ Claude Code keeps skills as `<root>/.claude/skills/<name>/SKILL.md`, rules in `C
 <a id="use-this-package"></a>
 ## Use this package
 
-Mount the plugin alongside the skill registry; it requires `ctx.skills`. A profile `patch` or a preset composition inserts it like any other plugin.
+Mount the plugin alongside the skill registry; it requires `ctx.skills`. The MCP Remote is mounted when `ctx.loader` is available, and agent-preset authoring additionally uses the optional `agentPresets` service. A profile `patch` or a preset composition inserts it like any other plugin.
 
 ```yaml
 - name: '@deepseek-ai/dsh-skill'
@@ -62,6 +62,12 @@ The project `.claude/CLAUDE.md` and the global `~/.claude/CLAUDE.md` are read an
 
 Rules under `.claude/rules/**` (project) and `~/.claude/rules/**` (user) are folded under the `claude-rule` message-source kind. A rule whose YAML frontmatter carries a `paths:` glob list is path-scoped: it folds into the request that follows a `read` of a file matching one of those globs. A rule without `paths` (or with an empty list) is always-on and folds into the first request like `CLAUDE.md`. Globs are matched against the project-root-relative path; the path-scoped trigger uses the harness `read` tool, and any matching rule is folded at most once per session.
 
+### MCP composition
+
+The `claudeCompatMcp` Remote exposes `addMcp`, `editMcp`, and `disableMcp` with one request object per operation. A request distinguishes the global Loader composition from a user-owned agent preset, the Loader row id from the MCP `serverName`, and the stdio or HTTP transport specification. Display descriptions remain in `context-injection.mcpDescriptions`; MCP connection rows never store them.
+
+Preset mutations are restricted to trusted user presets and use the Loader entry-list dialect with an atomic, locked read-modify-write, so `!!js` expressions remain valid. A direct, unpatched global Include is written through Loader updates. Layered profile roots are refused because Include write-back would flatten bundle and user patch layers. Editing a preset file does not change an already mounted standing preset; a new mount reads the committed file.
+
 -----
 
 <a id="understand-the-implementation"></a>
@@ -86,6 +92,9 @@ The skill provider follows the `skill-filesystem` model: discovery parses frontm
 | [`src/frontmatter.ts`](src/frontmatter.ts) | Shared YAML frontmatter parsing used by skills and rules |
 | [`src/instructions.ts`](src/instructions.ts) | Claude Code rule discovery and pre-step injection |
 | [`src/rules.ts`](src/rules.ts) | `.claude/rules/**` discovery, `paths:` matching, and read-triggered folding |
+| [`src/mcp-remote.ts`](src/mcp-remote.ts) | `claudeCompatMcp` Remote and global/preset row mutations |
+| [`src/mcp-authoring.ts`](src/mcp-authoring.ts) | Preset YAML validation, locking, and atomic Loader-dialect write-back |
+| [`src/types.ts`](src/types.ts) | Client-safe MCP requests, results, and Remote error details |
 | — | No runtime invariant companion is published; this package exposes no independent event sequence or mutable data relation beyond the registry and message-source contracts. |
 
 </details>
@@ -143,6 +152,9 @@ Append-only; folded rules follow the reusable request prefix and do not invalida
 - **User-level path rules are folded on the same read trigger** — the reference implementation silently ignores `~/.claude/rules` path rules; this package folds both project and user trees (each at most once).
 - **Project scope is the nearest `.git` ancestor** — workspaces without that marker fall back to the supplied cwd.
 - **Malformed entries disappear** — a `.claude/skills` file without valid frontmatter is skipped rather than surfaced in the catalog.
+- **Layered global roots are read-only to MCP authoring** — a profile assembled from bundle or user patch layers needs a persistent layer writer before the Remote can safely edit it; the direct Include writer refuses to flatten those layers.
+- **Preset writes are YAML round-trips** — comments and source formatting are not preserved, although the Loader `!!js` dialect is retained.
+- **MCP row controls are Remote-only in this increment** — the settings page can display and edit descriptions, while add/edit/disable callers use the generated `claudeCompatMcp` Client namespace.
 
 <a id="dev-note"></a>
 ### Dev Note

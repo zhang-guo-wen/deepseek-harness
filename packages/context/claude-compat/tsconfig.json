@@ -9,12 +9,18 @@
   ],
   "references": [
     { "path": "../../../vendor/cordis" },
+    { "path": "../../../vendor/include" },
+    { "path": "../../../vendor/group" },
+    { "path": "../../../vendor/loader" },
     { "path": "../../../vendor/schemastery" },
+    { "path": "../../util/atomic-write" },
     { "path": "../../llm/llm" },
     { "path": "../../core/agent" },
     { "path": "../../core/session" },
     { "path": "../../core/tools" },
     { "path": "../../fs/fs" },
-    { "path": "../../skill/skill" }
+    { "path": "../../skill/skill" },
+    { "path": "../../preset/agent-presets" },
+    { "path": "../../typert/protocol" }
   ]
 }

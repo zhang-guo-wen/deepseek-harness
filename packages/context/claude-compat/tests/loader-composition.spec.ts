@@ -66,6 +66,8 @@ describe('real Loader composition', () => {
         '    claudeHome: ' + JSON.stringify(claudeHome),
       ])
 
+      expect(loaded.get('claudeCompatMcp')).toBeDefined()
+
       const unloaded = [...loaded.loader.entries()]
         .filter(entry => entry.fiber === undefined && !entry.disabled)
         .map(entry => entry.options.name)

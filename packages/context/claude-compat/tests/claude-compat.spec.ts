@@ -191,13 +191,14 @@ describe('user system-prompt section', () => {
       get: (name: string) => name === 'systemPrompt'
         ? withSystemPrompt ? { section: (section: Section) => { sections.push(section) } } : undefined
         : undefined,
+      plugin: () => undefined,
     } as unknown as Context
     return { ctx, sections }
   }
 
-  it('registers the user system prompt as a live system-prompt section', () => {
+  it('registers the user system prompt as a live system-prompt section', async () => {
     const { ctx, sections } = stubCtx(true)
-    apply(ctx, {})
+    await apply(ctx, {})
 
     expect(sections).toHaveLength(1)
     expect(sections[0]?.name).toBe('context-injection:user-system-prompt')
@@ -205,9 +206,9 @@ describe('user system-prompt section', () => {
     expect((sections[0]?.text as () => string)()).toBe('user guidance')
   })
 
-  it('skips registration when the system-prompt service is absent', () => {
+  it('skips registration when the system-prompt service is absent', async () => {
     const { ctx } = stubCtx(false)
     // No throw: the section is simply not registered.
-    apply(ctx, {})
+    await apply(ctx, {})
   })
 })

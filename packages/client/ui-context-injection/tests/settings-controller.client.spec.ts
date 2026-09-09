@@ -1,11 +1,18 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi, type Mock } from 'vitest'
-import type { PluginInventorySnapshot } from '@deepseek-ai/dsh-api-remotes/client'
+import type {
+  AddMcpRequest,
+  DisableMcpRequest,
+  EditMcpRequest,
+  McpMutationResult,
+  PluginInventorySnapshot,
+} from '@deepseek-ai/dsh-api-remotes/client'
 import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
 import {
   ContextInjectionController,
   mapMcpServers,
   type ContextInjectionFlags,
+  type McpAuthoringActions,
   type McpServer,
 } from '../src/client/settings-controller.ts'
 
@@ -44,6 +51,26 @@ function fakeScope(
 
 /** A ready roster of no MCP servers. */
 const emptyMcps = (): Promise<readonly McpServer[]> => Promise.resolve([])
+
+/**
+ * A no-op Host MCP authoring face. These controller tests never author a row,
+ * so the callbacks stay unused while `inject()` still reads them.
+ */
+function emptyAuthoring(): McpAuthoringActions {
+  return {
+    addMcp: vi.fn<(request: AddMcpRequest) => Promise<McpMutationResult>>(),
+    editMcp: vi.fn<(request: EditMcpRequest) => Promise<McpMutationResult>>(),
+    disableMcp: vi.fn<(request: DisableMcpRequest) => Promise<McpMutationResult>>(),
+  }
+}
+
+/** Build a controller with a no-op authoring face and an optional roster loader. */
+function makeController(
+  scope: SettingsScope<ContextInjectionFlags>,
+  mcps: () => Promise<readonly McpServer[]> = emptyMcps,
+): ContextInjectionController {
+  return new ContextInjectionController(scope, mcps, emptyAuthoring())
+}
 
 describe('mapMcpServers', () => {
   const SNAPSHOT = {
@@ -90,7 +117,7 @@ describe('mapMcpServers', () => {
 describe('ContextInjectionController', () => {
   it('projects the ready snapshot and exposes the section face', () => {
     const { scope } = fakeScope({ claude: true, codex: false, systemPrompt: 'hi' })
-    const controller = new ContextInjectionController(scope, emptyMcps)
+    const controller = makeController(scope)
 
     const state = controller.inject().hooks.contextInjection.getSnapshot()
     expect(state.available).toBe(true)
@@ -105,7 +132,7 @@ describe('ContextInjectionController', () => {
 
   it('toggles a field through the scope when ready and writable', () => {
     const { scope, set } = fakeScope({ claude: true, codex: true, systemPrompt: '' })
-    const controller = new ContextInjectionController(scope, emptyMcps)
+    const controller = makeController(scope)
 
     controller.inject().toggle('claude')
     expect(set).toHaveBeenCalledWith('claude', false)
@@ -114,17 +141,17 @@ describe('ContextInjectionController', () => {
 
   it('ignores toggle writes when not ready or not writable', () => {
     const notReady = fakeScope({ claude: true, codex: true, systemPrompt: '' }, { ready: false })
-    new ContextInjectionController(notReady.scope, emptyMcps).inject().toggle('claude')
+    makeController(notReady.scope).inject().toggle('claude')
     expect(notReady.set).not.toHaveBeenCalled()
 
     const notWritable = fakeScope({ claude: true, codex: true, systemPrompt: '' }, { writable: false })
-    new ContextInjectionController(notWritable.scope, emptyMcps).inject().toggle('codex')
+    makeController(notWritable.scope).inject().toggle('codex')
     expect(notWritable.set).not.toHaveBeenCalled()
   })
 
   it('ignores toggle writes when no value is held', () => {
     const { scope, set } = fakeScope({ claude: true, codex: true, systemPrompt: '' }, { value: undefined })
-    const controller = new ContextInjectionController(scope, emptyMcps)
+    const controller = makeController(scope)
     controller.inject().toggle('claude')
     expect(set).not.toHaveBeenCalled()
     // Projection falls back to defaults when no value is held.
@@ -136,7 +163,7 @@ describe('ContextInjectionController', () => {
 
   it('persists the system prompt through the scope', () => {
     const { scope, set } = fakeScope()
-    const controller = new ContextInjectionController(scope, emptyMcps)
+    const controller = makeController(scope)
     controller.inject().updateSystemPrompt('answer in Chinese')
     expect(set).toHaveBeenCalledWith('systemPrompt', 'answer in Chinese')
     controller.dispose()
@@ -144,17 +171,17 @@ describe('ContextInjectionController', () => {
 
   it('ignores system-prompt writes when not ready or not writable', () => {
     const notReady = fakeScope(undefined, { ready: false })
-    new ContextInjectionController(notReady.scope, emptyMcps).inject().updateSystemPrompt('x')
+    makeController(notReady.scope).inject().updateSystemPrompt('x')
     expect(notReady.set).not.toHaveBeenCalled()
 
     const notWritable = fakeScope(undefined, { writable: false })
-    new ContextInjectionController(notWritable.scope, emptyMcps).inject().updateSystemPrompt('x')
+    makeController(notWritable.scope).inject().updateSystemPrompt('x')
     expect(notWritable.set).not.toHaveBeenCalled()
   })
 
   it('persists an MCP description through the scope', () => {
     const { scope, set } = fakeScope()
-    const controller = new ContextInjectionController(scope, emptyMcps)
+    const controller = makeController(scope)
     controller.inject().updateMcpDescription('global:engram', 'Memory river view')
     expect(set).toHaveBeenCalledWith('mcpDescriptions', { 'global:engram': 'Memory river view' })
     controller.dispose()
@@ -162,7 +189,7 @@ describe('ContextInjectionController', () => {
 
   it('removes an MCP description when cleared', () => {
     const { scope, set } = fakeScope({ claude: true, codex: true, systemPrompt: '', mcpDescriptions: { 'global:engram': 'x' } })
-    const controller = new ContextInjectionController(scope, emptyMcps)
+    const controller = makeController(scope)
     controller.inject().updateMcpDescription('global:engram', '')
     expect(set).toHaveBeenCalledWith('mcpDescriptions', {})
     controller.dispose()
@@ -170,7 +197,7 @@ describe('ContextInjectionController', () => {
 
   it('publishes a fresh projection when the scope notifies', () => {
     const { scope, set } = fakeScope({ claude: true, codex: true, systemPrompt: '' }, { writable: true })
-    const controller = new ContextInjectionController(scope, emptyMcps)
+    const controller = makeController(scope)
     const store = controller.inject().hooks.contextInjection
     expect(store.getSnapshot().claude).toBe(true)
     // Simulate a Host write landing: the scope mutates value and notifies.
