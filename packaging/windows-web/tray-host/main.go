@@ -29,7 +29,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -51,17 +50,13 @@ var (
 	// cleanStart 为 true 时以"纯净启动"运行：用临时空 DSH_HOME 启动，
 	// 不加载任何用户插件，用于诊断插件导致的崩溃。
 	cleanStart bool
-	// restartTimes 记录最近崩溃重启的时间戳，用于防止无限快速重启。
-	restartTimes []time.Time
 )
 
 const (
-	// maxRestarts 是重启窗口内允许的崩溃重启次数上限；超出即暂停拉起并提示。
-	maxRestarts = 5
-	// restartWindow 是崩溃统计窗口（纳秒）。
-	restartWindow = 30 * time.Second
-	// crashDelay 是连续两次拉起之间的间隔，避免瞬间反复重启。
-	crashDelay = 2 * time.Second
+	// startupTimeout 是“启动起来”的判定窗口：子进程须在 startupTimeout 内打印出
+	// 端口 URL，否则视为未启动。应用只启动一次、不自动重启，等待不超过 3 秒；
+	// 启动失败立即弹窗询问是否进入纯净模式。
+	startupTimeout = 3 * time.Second
 	// cleanHomeSubdir 是纯净启动用的临时 DSH_HOME 目录名（<install>\<name>）。
 	cleanHomeSubdir = "clean-data"
 )
@@ -126,8 +121,9 @@ func onReady() {
 	}()
 }
 
-// monitorLoop 是守护主体：循环拉起 harness 子进程，直到用户主动退出或连续
-// 崩溃超过阈值。每次崩溃后按 crashDelay 隔开，避免瞬间反复重启。
+// monitorLoop 是守护主体：只启动一次 harness 子进程，不做自动重启。启动失败
+// （崩溃或 startupTimeout 内没起来）立即弹窗询问是否进入纯净模式；进入纯净模式
+// 也只再启动一次，仍失败则停止，不再重复弹窗。
 func monitorLoop(paths harnessPaths, statusItem *systray.MenuItem) {
 	for {
 		// 每次拉起前反映当前运行模式。
@@ -139,33 +135,34 @@ func monitorLoop(paths harnessPaths, statusItem *systray.MenuItem) {
 		} else {
 			statusItem.SetTitle("harness 运行中")
 		}
-		quit := launchOnce(paths, statusItem)
-		if quit {
+		stop := launchOnce(paths, statusItem)
+		if stop {
 			return // 用户主动退出，不再拉起
 		}
-		// 子进程异常退出：检查是否已连续崩溃过多。
-		if overRestartBudget() {
-			// 崩溃超过阈值：弹窗询问是否进入纯净模式（用临时空家园隔离插件）。
-			if askCleanMode() {
-				// 进入纯净模式：切换 DSH_HOME 到 clean-data，清零崩溃计数后继续。
-				mu.Lock()
-				cleanStart = true
-				restartTimes = nil
-				mu.Unlock()
-				statusItem.SetTitle("harness 运行中（纯净启动）")
-				time.Sleep(crashDelay)
-				continue
+		// 启动失败（崩溃或 startupTimeout 内没起来）：不重启，立即弹窗。
+		if askCleanMode() {
+			// 进入纯净模式：切换 DSH_HOME 到 clean-data，只再启动一次。
+			mu.Lock()
+			cleanStart = true
+			mu.Unlock()
+			statusItem.SetTitle("harness 运行中（纯净启动）")
+			stop = launchOnce(paths, statusItem)
+			if stop {
+				return
 			}
-			// 用户选择不进入纯净模式：不再拉起，退出守护。
+			// 纯净启动也失败：停止守护，不再重复弹窗。
+			statusItem.SetTitle("harness 已暂停")
 			mu.Lock()
 			stopping = true
 			mu.Unlock()
-			statusItem.SetTitle("harness 已暂停重启")
 			return
 		}
-		recordRestart()
-		statusItem.SetTitle("正在重启 harness (" + strconv.Itoa(restartCount()) + ")")
-		time.Sleep(crashDelay)
+		// 用户选择不进入纯净模式：退出守护。
+		mu.Lock()
+		stopping = true
+		mu.Unlock()
+		statusItem.SetTitle("harness 已暂停重启")
+		return
 	}
 }
 
@@ -184,10 +181,11 @@ func currentHome(paths harnessPaths) string {
 	return paths.userHome
 }
 
-// launchOnce 启动一次 harness 子进程并阻塞到它退出。返回是否用户主动退出
-// （此时不该再拉起）。stdout 用于学习端口；stderr 落盘到日志文件供诊断。
-// 启动命令不传 --patch：插件的挂载由所选 DSH_HOME 的 web profile 自身的
-// cordis.patch.yml 负责（系统默认插件加载机制）。
+// launchOnce 启动一次 harness 子进程并阻塞到它退出（或 startupTimeout 判定未启动）。
+// 返回是否用户主动退出（true 时不该再拉起）。子进程须在 startupTimeout 内打印出
+// 端口 URL，否则被杀掉并按“未启动”处理，交由守护循环弹窗询问纯净模式。
+// stdout 用于学习端口；stderr 落盘到日志文件供诊断。启动命令不传 --patch：
+// 插件的挂载由所选 DSH_HOME 的 web profile 自身的 cordis.patch.yml 负责。
 func launchOnce(paths harnessPaths, statusItem *systray.MenuItem) bool {
 	home := currentHome(paths)
 	_ = os.MkdirAll(home, 0o755)
@@ -210,90 +208,95 @@ func launchOnce(paths harnessPaths, statusItem *systray.MenuItem) bool {
 	}
 
 	stdout, pipeErr := cmd.StdoutPipe()
-	if pipeErr == nil {
-		if err := cmd.Start(); err != nil {
-			mu.Lock()
-			stoppingAtCrash := stopping
-			mu.Unlock()
-			if logHandle != nil {
-				logHandle.Close()
-			}
-			statusItem.SetTitle("harness 启动失败")
-			if !stoppingAtCrash {
-				return false // 触发守护重试
-			}
-			return true
-		}
-		mu.Lock()
-		child = cmd
-		mu.Unlock()
-
-		// 等待子进程退出：先学习端口，再阻塞到 exit。
-		readURL(stdout)
-		waitErr := cmd.Wait()
-		if logHandle != nil {
-			logHandle.Close()
-		}
-
-		mu.Lock()
-		child = nil
-		stoppingAtCrash := stopping
-		mu.Unlock()
-
-		if stoppingAtCrash {
-			return true
-		}
-		_ = waitErr
-		return false // 异常退出，返回给守护循环去拉起
-	}
-
-	// stdout 管道创建失败：仍尝试直接启动（无端口学习），同样守护。
-	if err := cmd.Start(); err != nil {
+	if pipeErr != nil || cmd.Start() != nil {
+		// 管道创建或进程启动失败：视为一次失败的启动。
 		statusItem.SetTitle("harness 启动失败")
 		mu.Lock()
-		quit := stopping
+		stop := stopping
 		mu.Unlock()
 		if logHandle != nil {
 			logHandle.Close()
 		}
-		return !quit
+		return stop
 	}
 	mu.Lock()
 	child = cmd
 	mu.Unlock()
-	waitErr := cmd.Wait()
+
+	urlCh := make(chan string, 1)
+	go scanURL(stdout, urlCh)
+	exitCh := make(chan error, 1)
+	go func() {
+		exitCh <- cmd.Wait()
+	}()
+
+	started := false
+	exitedDuringStartup := false
+	select {
+	case url := <-urlCh:
+		// 成功拿到端口 URL：记录并（首次）自动打开页面。
+		mu.Lock()
+		serverURL = url
+		first := firstLaunch
+		firstLaunch = false
+		mu.Unlock()
+		if first {
+			openBrowser(url)
+		}
+		started = true
+	case <-time.After(startupTimeout):
+		// 3 秒内没有打印端口 URL：判定为没有启动起来。
+	case <-exitCh:
+		// 启动阶段就退出（崩溃）。
+		exitedDuringStartup = true
+	}
+
+	if !started {
+		if !exitedDuringStartup {
+			_ = cmd.Process.Kill()
+			<-exitCh
+		}
+		if logHandle != nil {
+			logHandle.Close()
+		}
+		mu.Lock()
+		child = nil
+		stop := stopping
+		mu.Unlock()
+		return stop
+	}
+
+	// 已成功启动：阻塞直到子进程退出（用户主动退出或运行中崩溃）。
+	<-exitCh
 	if logHandle != nil {
 		logHandle.Close()
 	}
 	mu.Lock()
 	child = nil
-	quit := stopping
+	stop := stopping
 	mu.Unlock()
-	if quit {
-		return true
-	}
-	_ = waitErr
-	return false
+	return stop
 }
 
-// readURL scans the harness stdout for its published URL and, on first success,
-// opens the page automatically.
-func readURL(stdout io.ReadCloser) {
+// scanURL drains harness stdout and reports the first published URL on urlCh.
+// It keeps draining until EOF so the child never blocks writing, then closes
+// urlCh. The caller uses startupTimeout to decide whether the URL arrived in time.
+func scanURL(stdout io.ReadCloser, urlCh chan<- string) {
 	defer stdout.Close()
-	re := regexp.MustCompile(`http://127\.0\.0\.1:(\d+)`)
+	// 启动 URL 形如 `dsh web: http://127.0.0.1:4567/?token=<base64url> (LAN: ...)`。
+	// 必须连同 `/?token=...` 一起捕获，浏览器才能用 token 换签名 cookie；
+	// 否则页面会提示 "dsh web authentication required"。
+	re := regexp.MustCompile(`http://127\.0\.0\.1:[0-9]+[^\s)]*`)
 	sc := bufio.NewScanner(stdout)
 	for sc.Scan() {
 		if m := re.FindStringSubmatch(sc.Text()); m != nil {
-			mu.Lock()
-			serverURL = "http://127.0.0.1:" + m[1]
-			first := firstLaunch
-			firstLaunch = false
-			mu.Unlock()
-			if first {
-				openBrowser(serverURL)
+			select {
+			case urlCh <- m[0]:
+			default:
 			}
 		}
 	}
+	close(urlCh)
 }
 
 // openBrowser hands a URL to the system default browser.
@@ -330,10 +333,10 @@ func userDshHome() string {
 // 所以用 user32!MessageBoxW 弹原生对话框。
 func askCleanMode() bool {
 	const (
-		mbYesNo         = 0x00000004 // MB_YESNO
-		mbIconQuestion  = 0x00000020 // MB_ICONQUESTION
-		mbDefButton2    = 0x00000100 // MB_DEFBUTTON2 (默认第二个按钮"否")
-		idYes           = 6          // IDYES
+		mbYesNo        = 0x00000004 // MB_YESNO
+		mbIconQuestion = 0x00000020 // MB_ICONQUESTION
+		mbDefButton2   = 0x00000100 // MB_DEFBUTTON2 (默认第二个按钮"否")
+		idYes          = 6          // IDYES
 	)
 	user32 := syscall.NewLazyDLL("user32.dll")
 	proc := user32.NewProc("MessageBoxW")
@@ -349,40 +352,4 @@ func askCleanMode() bool {
 		uintptr(mbYesNo|mbIconQuestion|mbDefButton2),
 	)
 	return ret == idYes
-}
-
-// pruneOldRestarts 丢弃窗口外的崩溃记录，使计数只反映最近 restartWindow。
-func pruneOldRestarts(now time.Time) {
-	cutoff := now.Add(-restartWindow)
-	kept := restartTimes[:0]
-	for _, t := range restartTimes {
-		if t.After(cutoff) {
-			kept = append(kept, t)
-		}
-	}
-	restartTimes = kept
-}
-
-// overRestartBudget 判断窗口内崩溃次数是否已达阈值（用于暂停拉起）。
-func overRestartBudget() bool {
-	mu.Lock()
-	defer mu.Unlock()
-	pruneOldRestarts(time.Now())
-	return len(restartTimes) >= maxRestarts
-}
-
-// recordRestart 记录一次崩溃（在拉起前调用）。
-func recordRestart() {
-	mu.Lock()
-	defer mu.Unlock()
-	pruneOldRestarts(time.Now())
-	restartTimes = append(restartTimes, time.Now())
-}
-
-// restartCount 返回窗口内已记录的崩溃次数。
-func restartCount() int {
-	mu.Lock()
-	defer mu.Unlock()
-	pruneOldRestarts(time.Now())
-	return len(restartTimes)
 }
