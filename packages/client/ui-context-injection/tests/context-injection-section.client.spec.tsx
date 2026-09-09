@@ -34,20 +34,23 @@ function makeProps(
   props: ContextInjectionSectionProps
   toggle: ReturnType<typeof vi.fn>
   updateSystemPrompt: ReturnType<typeof vi.fn>
+  updateMcpDescription: ReturnType<typeof vi.fn>
 } {
   const snapshot: ContextInjectionSectionState = {
-    available: true, writable: true, claude: true, codex: true, systemPrompt: '', ...state,
+    available: true, writable: true, claude: true, codex: true, systemPrompt: '', mcpDescriptions: {}, ...state,
   }
   const toggle = vi.fn()
   const updateSystemPrompt = vi.fn()
+  const updateMcpDescription = vi.fn()
   const props = {
     t,
     useContextInjection: (selector: (value: ContextInjectionSectionState) => unknown) => selector(snapshot),
     toggle,
     updateSystemPrompt,
+    updateMcpDescription,
     mcps,
   } as unknown as ContextInjectionSectionProps
-  return { props, toggle, updateSystemPrompt }
+  return { props, toggle, updateSystemPrompt, updateMcpDescription }
 }
 
 describe('ContextInjectionSection', () => {
@@ -82,7 +85,9 @@ describe('ContextInjectionSection', () => {
   })
 
   it('renders the real MCP roster with config scope and load status', async () => {
-    const view = render(<ContextInjectionSection {...makeProps().props} />)
+    const view = render(<ContextInjectionSection {...makeProps({
+      mcpDescriptions: { 'global:engram': 'Memory river view', 'preset:standard:github': 'GitHub tools' },
+    }).props} />)
 
     fireEvent.click(screen.getByRole('tab', { name: t('tab.mcp') }))
     await screen.findByText('engram')
@@ -99,6 +104,12 @@ describe('ContextInjectionSection', () => {
     expect(view.container.querySelectorAll('[data-mcp-scope="global"]').length).toBeGreaterThan(0)
     expect(view.container.querySelector('[data-mcp-name="github"]')).not.toBeNull()
     expect(screen.getByText(t('mcp.subtitle'))).toBeTruthy()
+
+    // Config scope stays on the right (badge); plugin-owned descriptions render as values.
+    expect(screen.getAllByText(t('mcp.scopeGlobal')).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(`${t('mcp.scopePreset')} · standard`)).toHaveLength(2)
+    expect(screen.getByDisplayValue('Memory river view')).toBeTruthy()
+    expect(screen.getByDisplayValue('GitHub tools')).toBeTruthy()
   })
 
   it('shows the empty message when no MCP server is configured', async () => {
@@ -121,6 +132,18 @@ describe('ContextInjectionSection', () => {
     fireEvent.click(screen.getByRole('button', { name: t('mcp.retry') }))
     await waitFor(() => { expect(mcps).toHaveBeenCalledTimes(2) })
     expect(await screen.findByText('engram')).toBeTruthy()
+  })
+
+  it('edits a plugin-owned MCP description on blur', async () => {
+    const { props, updateMcpDescription } = makeProps()
+    render(<ContextInjectionSection {...props} />)
+    fireEvent.click(screen.getByRole('tab', { name: t('tab.mcp') }))
+    await screen.findByText('engram')
+
+    const desc = screen.getAllByLabelText(t('mcp.descriptionLabel'))[0]! as HTMLInputElement
+    fireEvent.change(desc, { target: { value: 'Memory river view' } })
+    fireEvent.blur(desc)
+    expect(updateMcpDescription).toHaveBeenCalledWith('global:engram', 'Memory river view')
   })
 
   it('does not write when the system-prompt box is blurred without edits', () => {

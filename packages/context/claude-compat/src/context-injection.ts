@@ -36,6 +36,12 @@ export interface ContextInjectionFlags {
   codex: boolean
   /** User-authored system prompt embedded at the system level of a session. */
   systemPrompt: string
+  /**
+   * Authoring descriptions for MCP rows, keyed by `<scope>:<serverName>`
+   * (`global:engram` or `preset:standard:mcp-github`). Plugin-owned display
+   * metadata; never reaches the model or the config file.
+   */
+  mcpDescriptions: Record<string, string>
 }
 
 /** Schema served to settings clients for the injection preference. */
@@ -43,6 +49,7 @@ export const CONTEXT_INJECTION_SCHEMA: Schema<ContextInjectionFlags> = z.object(
   claude: z.boolean().default(true),
   codex: z.boolean().default(true),
   systemPrompt: z.string().default(''),
+  mcpDescriptions: z.dict(String).default({}),
 })
 
 /** Composition-layer defaults for the two toggles when a plugin uses them. */
@@ -100,6 +107,7 @@ export function registerContextInjection(
     claude: config.claude ?? true,
     codex: config.codex ?? true,
     systemPrompt: '',
+    mcpDescriptions: {},
   }
   let source: InjectionFlagsSource = () => ({ ...base })
   ctx.inject(['settings'], (settingsCtx) => {

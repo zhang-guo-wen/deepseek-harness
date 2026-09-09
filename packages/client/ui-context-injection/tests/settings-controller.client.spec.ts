@@ -11,7 +11,7 @@ import {
 
 /** A minimal Host settings scope the controller reads and writes. */
 function fakeScope(
-  initial: ContextInjectionFlags = { claude: true, codex: true, systemPrompt: '' },
+  initial: Partial<ContextInjectionFlags> = {},
   opts: { ready?: boolean; writable?: boolean; value?: ContextInjectionFlags | undefined } = {},
 ): {
   scope: SettingsScope<ContextInjectionFlags>
@@ -19,7 +19,7 @@ function fakeScope(
 } {
   let value: ContextInjectionFlags | undefined
   if ('value' in opts) value = opts.value
-  else value = initial
+  else value = { claude: true, codex: true, systemPrompt: '', mcpDescriptions: {}, ...initial }
   const ready = opts.ready ?? true
   const writable = opts.writable ?? true
   const listeners = new Set<() => void>()
@@ -48,7 +48,7 @@ const emptyMcps = (): Promise<readonly McpServer[]> => Promise.resolve([])
 describe('mapMcpServers', () => {
   const SNAPSHOT = {
     entries: [
-      { entryId: 'memory-engram', moduleName: '@deepseek-ai/dsh-mcp-client', enabled: true, fiberPhase: 'active' },
+      { entryId: 'memory-engram', description: 'Memory river view', moduleName: '@deepseek-ai/dsh-mcp-client', enabled: true, fiberPhase: 'active' },
       { entryId: 'memorix', moduleName: '@deepseek-ai/dsh-mcp-client', enabled: false, fiberPhase: null },
       { entryId: 'tool-fs', moduleName: '@deepseek-ai/dsh-tool-fs', enabled: true, fiberPhase: 'active' },
     ],
@@ -150,6 +150,22 @@ describe('ContextInjectionController', () => {
     const notWritable = fakeScope(undefined, { writable: false })
     new ContextInjectionController(notWritable.scope, emptyMcps).inject().updateSystemPrompt('x')
     expect(notWritable.set).not.toHaveBeenCalled()
+  })
+
+  it('persists an MCP description through the scope', () => {
+    const { scope, set } = fakeScope()
+    const controller = new ContextInjectionController(scope, emptyMcps)
+    controller.inject().updateMcpDescription('global:engram', 'Memory river view')
+    expect(set).toHaveBeenCalledWith('mcpDescriptions', { 'global:engram': 'Memory river view' })
+    controller.dispose()
+  })
+
+  it('removes an MCP description when cleared', () => {
+    const { scope, set } = fakeScope({ claude: true, codex: true, systemPrompt: '', mcpDescriptions: { 'global:engram': 'x' } })
+    const controller = new ContextInjectionController(scope, emptyMcps)
+    controller.inject().updateMcpDescription('global:engram', '')
+    expect(set).toHaveBeenCalledWith('mcpDescriptions', {})
+    controller.dispose()
   })
 
   it('publishes a fresh projection when the scope notifies', () => {

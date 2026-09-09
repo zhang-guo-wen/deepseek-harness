@@ -5,10 +5,12 @@
  * scope, and supplies the MCP server roster the MCP tab renders.
  *
  * The MCP roster comes from the already-wired `remote.pluginInventory` read of
- * the Loader (which is loaded from the deployment and preset config files), so
- * it is real-time and reflects both the global plane and every agent-preset
+ * the Loader (loaded from the deployment and preset config files), so it is
+ * real-time and reflects both the global plane and every agent-preset
  * composition. Every mcp-client occurrence is surfaced without deduplication,
- * tagged with where it is configured (`global` or a preset id).
+ * tagged with where it is configured (`global` or a preset id). Descriptions are
+ * plugin-owned: stored in the `context-injection` namespace's `mcpDescriptions`
+ * map and merged onto the rows by the component.
  * @module @deepseek-ai/dsh-client-ui-context-injection/settings-controller
  */
 
@@ -25,10 +27,17 @@ export const MCP_CLIENT_MODULE = '@deepseek-ai/dsh-mcp-client'
 /** Lifecycle phase of one mcp-client Loader entry (same vocabulary as the inventory). */
 export type McpPhase = PluginInventorySnapshot['entries'][number]['fiberPhase']
 
+/** Stable key for a plugin-owned MCP description (`<scope>:<name>` or `preset:<id>:<name>`). */
+export function mcpDescriptionKey(server: McpServer): string {
+  return server.scope === 'preset' ? `preset:${server.presetId ?? ''}:${server.serverName}` : `${server.scope}:${server.serverName}`
+}
+
 /** One loaded MCP server, as the MCP management tab presents it. */
 export interface McpServer {
   /** Instance identifier (the Loader entry id, or a preset row's id). */
   serverName: string
+  /** Authoring description; plugin-owned, resolved by the section from `mcpDescriptions`. */
+  description?: string
   /** Where this occurrence is configured. */
   scope: 'global' | 'preset'
   /** Preset id when `scope` is `preset`. */
@@ -39,11 +48,12 @@ export interface McpServer {
   fiberPhase: McpPhase
 }
 
-/** The two master toggles and the user system prompt resolved by the Host schema. */
+/** The two master toggles, the user system prompt, and the MCP description map. */
 export interface ContextInjectionFlags {
   claude: boolean
   codex: boolean
   systemPrompt: string
+  mcpDescriptions: Record<string, string>
 }
 
 /** Snapshot the section renders. */
@@ -55,6 +65,8 @@ export interface ContextInjectionSectionState {
   claude: boolean
   codex: boolean
   systemPrompt: string
+  /** Plugin-owned MCP row descriptions keyed by {@link mcpDescriptionKey}. */
+  mcpDescriptions: Record<string, string>
 }
 
 /** Registration-side face for the section. */
@@ -67,6 +79,8 @@ export interface ContextInjectionSectionFace {
   toggle: (name: 'claude' | 'codex') => void
   /** Persist the system prompt text the user committed. */
   updateSystemPrompt: (value: string) => void
+  /** Persist one MCP row's description. */
+  updateMcpDescription: (key: string, description: string) => void
   /** Resolve the current loaded MCP roster from the Host plugin inventory. */
   mcps: () => Promise<readonly McpServer[]>
 }
@@ -74,7 +88,8 @@ export interface ContextInjectionSectionFace {
 /**
  * Project a Host plugin-inventory snapshot onto the MCP roster, keeping every
  * mcp-client occurrence (global plane plus each preset composition) without
- * deduplicating cross-scope repeats.
+ * deduplicating cross-scope repeats. Descriptions are not read here — they are
+ * plugin-owned and merged by the section from the `mcpDescriptions` map.
  * @param snapshot - the load-time inventory read from the Host.
  * @returns one row per mcp-client occurrence, tagged with its config scope.
  */
@@ -133,6 +148,7 @@ export class ContextInjectionController {
       hooks: { contextInjection: this.store },
       toggle: (name) => { this.toggle(name) },
       updateSystemPrompt: (value) => { this.updateSystemPrompt(value) },
+      updateMcpDescription: (key, description) => { this.updateMcpDescription(key, description) },
       mcps: this.mcps,
     }
   }
@@ -151,6 +167,16 @@ export class ContextInjectionController {
     void this.scope.set('systemPrompt', value)
   }
 
+  private updateMcpDescription(key: string, description: string): void {
+    const snapshot = this.scope.getSnapshot()
+    if (snapshot.status !== 'ready' || !snapshot.writable) return
+    const map = snapshot.value?.mcpDescriptions ?? {}
+    const next = { ...map }
+    if (description === '') Reflect.deleteProperty(next, key)
+    else next[key] = description
+    void this.scope.set('mcpDescriptions', next)
+  }
+
   private projection(): ContextInjectionSectionState {
     const snapshot = this.scope.getSnapshot()
     return {
@@ -159,6 +185,7 @@ export class ContextInjectionController {
       claude: snapshot.value?.claude ?? true,
       codex: snapshot.value?.codex ?? true,
       systemPrompt: snapshot.value?.systemPrompt ?? '',
+      mcpDescriptions: snapshot.value?.mcpDescriptions ?? {},
     }
   }
 

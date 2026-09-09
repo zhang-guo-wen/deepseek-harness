@@ -14,7 +14,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { StateDot, Switch } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { StateDotState } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type { ContextInjectionSectionFace, McpPhase, McpServer } from './settings-controller.ts'
+import { mcpDescriptionKey, type ContextInjectionSectionFace, type McpPhase, type McpServer } from './settings-controller.ts'
 import type { ContextInjectionSectionKey } from './locales.ts'
 import css from './ContextInjectionSection.module.css'
 
@@ -62,17 +62,31 @@ function statusOf(server: McpServer, t: Translate): { label: string; dot: StateD
   return { label: t(PHASE_LABEL[server.fiberPhase]), dot: PHASE_DOT[server.fiberPhase] }
 }
 
-/** One rendered MCP server row, tagged with its config scope and load status. */
-function McpRow({ server, t }: { readonly server: McpServer; readonly t: Translate }): ReactNode {
+/** One rendered MCP server row: name, plugin-owned description, scope and status. */
+function McpRow({ server, description, onEditDescription, t }: {
+  readonly server: McpServer
+  readonly description: string
+  readonly onEditDescription: (value: string) => void
+  readonly t: Translate
+}): ReactNode {
   const scope = server.scope === 'global'
     ? t('mcp.scopeGlobal')
     : `${t('mcp.scopePreset')} · ${server.presetId ?? ''}`
   const status = statusOf(server, t)
+  const [draft, setDraft] = useState<string | null>(null)
+  const value = draft ?? description
   return (
     <div className={css.mcpRow} data-mcp-scope={server.scope} data-mcp-name={server.serverName}>
       <div className={css.mcpMain}>
         <span className={css.mcpName}>{server.serverName}</span>
-        <span className={css.mcpMeta}>{scope}</span>
+        <input
+          className={css.mcpDesc}
+          value={value}
+          placeholder={t('mcp.descriptionPlaceholder')}
+          aria-label={t('mcp.descriptionLabel')}
+          onChange={(event) => { setDraft(event.currentTarget.value) }}
+          onBlur={() => { onEditDescription(value); setDraft(null) }}
+        />
       </div>
       <div className={css.mcpRight}>
         <span className={css.badge}>{scope}</span>
@@ -87,7 +101,7 @@ function McpRow({ server, t }: { readonly server: McpServer; readonly t: Transla
 
 /** The settings section body. */
 export function ContextInjectionSection(props: ContextInjectionSectionProps): ReactNode {
-  const { useContextInjection, t, toggle, updateSystemPrompt, mcps } = props
+  const { useContextInjection, t, toggle, updateSystemPrompt, updateMcpDescription, mcps } = props
   const state = useContextInjection(snapshot => snapshot)
   const [activeTab, setActiveTab] = useState<TabId>('prompt')
   const [promptDraft, setPromptDraft] = useState<string | null>(null)
@@ -196,7 +210,18 @@ export function ContextInjectionSection(props: ContextInjectionSectionProps): Re
           ) : null}
           {mcpView.status === 'ready' && mcpView.servers.length > 0 ? (
             <div className={css.mcpList}>
-              {mcpView.servers.map(server => <McpRow key={`${server.scope}:${server.serverName}`} server={server} t={t} />)}
+              {mcpView.servers.map((server) => {
+                const key = mcpDescriptionKey(server)
+                return (
+                  <McpRow
+                    key={key}
+                    server={server}
+                    description={server.description ?? state.mcpDescriptions[key] ?? ''}
+                    onEditDescription={(value) => { updateMcpDescription(key, value) }}
+                    t={t}
+                  />
+                )
+              })}
             </div>
           ) : null}
         </div>
