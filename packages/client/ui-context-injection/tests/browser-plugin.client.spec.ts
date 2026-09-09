@@ -4,7 +4,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { apply, name } from '../src/index.ts'
 import { apply as applyClient } from '../src/client/index.ts'
 import { NS } from '../src/client/locales.ts'
-import { CONTEXT_INJECTION_NS } from '../src/client/settings-controller.ts'
+import { CONTEXT_INJECTION_NS, type ContextInjectionSectionFace } from '../src/client/settings-controller.ts'
 
 function fakeScope(): unknown {
   const value = { claude: true, codex: true, systemPrompt: '' }
@@ -22,8 +22,15 @@ function fakeScope(): unknown {
   }
 }
 
-function stubCtx(): { ctx: Context; disposers: Array<() => void> } {
+function stubCtx(): {
+  ctx: Context
+  disposers: Array<() => void>
+  face: () => ContextInjectionSectionFace | undefined
+  list: ReturnType<typeof vi.fn>
+} {
   const disposers: Array<() => void> = []
+  let capturedFace: ContextInjectionSectionFace | undefined
+  const list = vi.fn()
   const ctx = {
     effect: vi.fn((fn: () => unknown) => {
       const result = fn()
@@ -36,16 +43,19 @@ function stubCtx(): { ctx: Context; disposers: Array<() => void> } {
     settingsScope: {
       bind: vi.fn(() => fakeScope()),
     },
+    remote: {
+      pluginInventory: { list },
+    },
     slots: {
       inject: vi.fn((_name: string, factory: () => void) => { factory() }),
       register: vi.fn((options: { label: () => string; inject: () => unknown }) => {
         options.label()
-        options.inject()
+        capturedFace = options.inject() as ContextInjectionSectionFace
         return () => {}
       }),
     },
   }
-  return { ctx: ctx as unknown as Context, disposers }
+  return { ctx: ctx as unknown as Context, disposers, face: () => capturedFace, list }
 }
 
 describe('browser plugin', () => {
@@ -69,5 +79,23 @@ describe('browser plugin', () => {
     // The settings-scope disposer is owned by the caller's fiber.
     expect(disposers).toHaveLength(1)
     for (const dispose of disposers) dispose()
+  })
+
+  it('loads the MCP roster through the plugin-inventory remote', async () => {
+    const { ctx, face, list } = stubCtx()
+    list.mockResolvedValueOnce({ ok: true, value: { entries: [], agentPresets: undefined } })
+    applyClient(ctx)
+
+    const servers = await face()?.mcps()
+    expect(servers).toEqual([])
+    expect(list).toHaveBeenCalledTimes(1)
+  })
+
+  it('surfaces an MCP roster read failure', async () => {
+    const { ctx, face, list } = stubCtx()
+    list.mockResolvedValueOnce({ ok: false, error: { code: 'PRIVATE', message: 'transport down' } })
+    applyClient(ctx)
+
+    await expect(face()?.mcps()).rejects.toThrow('pluginInventory.list failed: PRIVATE: transport down')
   })
 })

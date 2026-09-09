@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ContextInjectionSection } from '../src/client/ContextInjectionSection.tsx'
 import type { ContextInjectionSectionProps } from '../src/client/ContextInjectionSection.tsx'
@@ -14,15 +14,22 @@ const t = ((key: ContextInjectionSectionKey, params?: Record<string, string>): s
     en[key],
   )) as ContextInjectionSectionProps['t']
 
+// One row per status branch so the mapping helpers are fully exercised.
 const SAMPLE_MCPS: readonly McpServer[] = [
-  { serverName: 'filesystem', transport: 'stdio', toolCount: 12, status: 'running' },
-  { serverName: 'github', transport: 'streamable-http', toolCount: 18, status: 'running' },
-  { serverName: 'playwright', transport: 'stdio', toolCount: 6, status: 'error' },
+  { serverName: 'engram', scope: 'global', presetId: undefined, enabled: true, fiberPhase: 'active' },
+  { serverName: 'memorix', scope: 'global', presetId: undefined, enabled: false, fiberPhase: null },
+  { serverName: 'github', scope: 'preset', presetId: 'standard', enabled: 'conditional', fiberPhase: null },
+  { serverName: 'planner', scope: 'global', presetId: undefined, enabled: true, fiberPhase: null },
+  { serverName: 'ddb', scope: 'preset', presetId: 'standard', enabled: true, fiberPhase: 'pending' },
+  { serverName: 'web', scope: 'global', presetId: undefined, enabled: true, fiberPhase: 'loading' },
+  { serverName: 'search', scope: 'global', presetId: undefined, enabled: true, fiberPhase: 'failed' },
+  { serverName: 'old', scope: 'global', presetId: undefined, enabled: true, fiberPhase: 'unloading' },
+  { serverName: 'edge', scope: 'preset', presetId: undefined, enabled: true, fiberPhase: 'pending' },
 ]
 
 function makeProps(
   state: Partial<ContextInjectionSectionState> = {},
-  mcps: () => readonly McpServer[] = () => SAMPLE_MCPS,
+  mcps: () => Promise<readonly McpServer[]> = () => Promise.resolve(SAMPLE_MCPS),
 ): {
   props: ContextInjectionSectionProps
   toggle: ReturnType<typeof vi.fn>
@@ -74,26 +81,46 @@ describe('ContextInjectionSection', () => {
     expect(toggle).toHaveBeenCalledWith('claude')
   })
 
-  it('shows the MCP tab with the loaded servers and status dots', () => {
-    render(<ContextInjectionSection {...makeProps().props} />)
+  it('renders the real MCP roster with config scope and load status', async () => {
+    const view = render(<ContextInjectionSection {...makeProps().props} />)
 
     fireEvent.click(screen.getByRole('tab', { name: t('tab.mcp') }))
-    expect(screen.getByText('filesystem')).toBeTruthy()
-    expect(screen.getByText('github')).toBeTruthy()
-    expect(screen.getByText('playwright')).toBeTruthy()
-    expect(screen.getAllByText(t('mcp.statusRunning'))).toHaveLength(2)
-    expect(screen.getByText(t('mcp.statusError'))).toBeTruthy()
-    expect(screen.getByText(t('mcp.transportHttp'))).toBeTruthy()
-    expect(screen.getAllByText(t('mcp.transportStdio'))).toHaveLength(2)
-    expect(screen.getByText(t('mcp.placeholderNote'))).toBeTruthy()
+    await screen.findByText('engram')
+
+    expect(screen.getAllByText(t('mcp.status.active'))).toHaveLength(1)
+    expect(screen.getByText(t('mcp.status.disabled'))).toBeTruthy()
+    expect(screen.getByText(t('mcp.status.conditional'))).toBeTruthy()
+    expect(screen.getByText(t('mcp.status.configured'))).toBeTruthy()
+    expect(screen.getAllByText(t('mcp.status.pending'))).toHaveLength(2)
+    expect(screen.getByText(t('mcp.status.loading'))).toBeTruthy()
+    expect(screen.getByText(t('mcp.status.failed'))).toBeTruthy()
+    expect(screen.getByText(t('mcp.status.unloading'))).toBeTruthy()
+    expect(view.container.querySelectorAll('[data-mcp-scope="preset"]')).toHaveLength(3)
+    expect(view.container.querySelectorAll('[data-mcp-scope="global"]').length).toBeGreaterThan(0)
+    expect(view.container.querySelector('[data-mcp-name="github"]')).not.toBeNull()
+    expect(screen.getByText(t('mcp.subtitle'))).toBeTruthy()
   })
 
-  it('shows the empty message when no MCP server is loaded', () => {
-    const { props } = makeProps({}, () => [])
+  it('shows the empty message when no MCP server is configured', async () => {
+    const { props } = makeProps({}, () => Promise.resolve([]))
     render(<ContextInjectionSection {...props} />)
 
     fireEvent.click(screen.getByRole('tab', { name: t('tab.mcp') }))
-    expect(screen.getByText(t('mcp.empty'))).toBeTruthy()
+    expect(await screen.findByText(t('mcp.empty'))).toBeTruthy()
+  })
+
+  it('shows an error and retries when the roster read fails', async () => {
+    const mcps = vi.fn<() => Promise<readonly McpServer[]>>()
+      .mockRejectedValueOnce(new Error('transport down'))
+      .mockResolvedValueOnce(SAMPLE_MCPS)
+    const { props } = makeProps({}, mcps)
+    render(<ContextInjectionSection {...props} />)
+
+    fireEvent.click(screen.getByRole('tab', { name: t('tab.mcp') }))
+    expect((await screen.findByRole('alert')).textContent).toBe(t('mcp.error'))
+    fireEvent.click(screen.getByRole('button', { name: t('mcp.retry') }))
+    await waitFor(() => { expect(mcps).toHaveBeenCalledTimes(2) })
+    expect(await screen.findByText('engram')).toBeTruthy()
   })
 
   it('does not write when the system-prompt box is blurred without edits', () => {
@@ -103,12 +130,25 @@ describe('ContextInjectionSection', () => {
     expect(updateSystemPrompt).not.toHaveBeenCalled()
   })
 
-  it('returns to the prompt tab from the MCP tab', () => {
+  it('ignores a roster that settles after unmount', async () => {
+    const ok = Promise.withResolvers<readonly McpServer[]>()
+    const okView = render(<ContextInjectionSection {...makeProps({}, () => ok.promise).props} />)
+    okView.unmount()
+    await act(async () => { ok.resolve(SAMPLE_MCPS) })
+
+    const err = Promise.withResolvers<readonly McpServer[]>()
+    const errView = render(<ContextInjectionSection {...makeProps({}, () => err.promise).props} />)
+    errView.unmount()
+    await act(async () => { err.reject(new Error('late failure')) })
+  })
+
+  it('returns to the prompt tab from the MCP tab', async () => {
     render(<ContextInjectionSection {...makeProps().props} />)
     fireEvent.click(screen.getByRole('tab', { name: t('tab.mcp') }))
+    await screen.findByText('engram')
     fireEvent.click(screen.getByRole('tab', { name: t('tab.prompt') }))
     expect(screen.getByText(t('prompt.intro'))).toBeTruthy()
-    expect(screen.queryByText('filesystem')).toBeNull()
+    expect(screen.queryByText('engram')).toBeNull()
   })
 
   it('disables the controls when settings are unavailable', () => {

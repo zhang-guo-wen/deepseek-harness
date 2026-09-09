@@ -17,16 +17,20 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: the slot registry Context merge (ctx.slots).
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+// Type-only: the Remote namespaces this plugin reads (ctx.remote.pluginInventory).
+import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import { ContextInjectionSection } from './ContextInjectionSection.tsx'
 import { en, NS, zh, type ContextInjectionSectionKey } from './locales.ts'
 import {
   CONTEXT_INJECTION_NS,
   ContextInjectionController,
+  mapMcpServers,
   type ContextInjectionFlags,
+  type McpServer,
 } from './settings-controller.ts'
 
 export type { ContextInjectionSectionProps } from './ContextInjectionSection.tsx'
-export type { ContextInjectionSectionFace, ContextInjectionSectionState } from './settings-controller.ts'
+export type { ContextInjectionSectionFace, ContextInjectionSectionState, McpServer } from './settings-controller.ts'
 export { NS } from './locales.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -37,7 +41,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 }
 
 /** Required services (cordis fiber inject). */
-export const inject = ['slots', 'locale', 'settingsScope']
+export const inject = ['slots', 'locale', 'settingsScope', 'remote', 'remote.pluginInventory']
 
 /**
  * Register the dictionaries and the context-injection settings section.
@@ -46,8 +50,16 @@ export const inject = ['slots', 'locale', 'settingsScope']
 export function apply(ctx: Context): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-context-injection: dictionaries')
   const t = ctx.locale.bind(NS)
+  const mcps = async (): Promise<readonly McpServer[]> => {
+    const result = await ctx.remote.pluginInventory.list()
+    if (!result.ok) {
+      throw new Error(`pluginInventory.list failed: ${result.error.code}: ${result.error.message}`)
+    }
+    return mapMcpServers(result.value)
+  }
   const controller = new ContextInjectionController(
     ctx.settingsScope.bind<ContextInjectionFlags>({ namespace: CONTEXT_INJECTION_NS }),
+    mcps,
   )
   ctx.effect(() => () => { controller.dispose() }, 'ui-context-injection: scope')
 

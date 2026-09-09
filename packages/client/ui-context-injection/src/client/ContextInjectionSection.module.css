@@ -223,14 +223,37 @@
   color: var(--dsw-alias-label-secondary);
 }
 
-.mcpNote {
-  margin: 4px 0 0;
-  font-size: 12px;
-  line-height: 18px;
+.mcpStatus {
+  margin: 0;
+  font-size: 13px;
   color: var(--dsw-alias-label-tertiary);
-  padding: 10px 12px;
-  border: 0.5px dashed var(--dsw-alias-border-l2);
-  border-radius: 10px;
+}
+
+.mcpFailure {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.mcpFailure p {
+  margin: 0;
+  font-size: 13px;
+}
+
+.mcpRetry {
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  padding: 4px 10px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.mcpRetry:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
 }
 
 .empty {
