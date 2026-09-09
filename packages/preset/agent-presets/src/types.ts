@@ -58,6 +58,28 @@ export interface AgentPresetDocument {
   readonly description?: string
 }
 
+/** The mcp-client config written into a preset row (`transport`, `serverName`, ..., `description`). */
+export interface McpRowConfig {
+  /** Stable server namespace; becomes the row id. */
+  readonly serverName: string
+  /** Authoring description shown in the settings roster. */
+  readonly description?: string
+  /** Transport kind; `stdio` or `streamable-http`. */
+  readonly transport?: 'stdio' | 'streamable-http'
+  /** Child-process executable for a stdio server. */
+  readonly command?: string
+  /** Arguments for a stdio server. */
+  readonly args?: readonly string[]
+  /** Extra env vars for a stdio server. */
+  readonly env?: Readonly<Record<string, string>>
+  /** Working directory for a stdio server. */
+  readonly cwd?: string
+  /** MCP endpoint URL for an HTTP server. */
+  readonly url?: string
+  /** Additional headers for an HTTP server. */
+  readonly headers?: Readonly<Record<string, string>>
+}
+
 declare module '@deepseek-ai/dsh-session-projection/types' {
   interface SessionProjectionStateMap {
     agentPreset: string | null

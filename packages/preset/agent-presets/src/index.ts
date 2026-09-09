@@ -39,6 +39,7 @@ import type { SettingsScope } from '@deepseek-ai/dsh-settings'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { discoverPresets, SHIPPED_PRESET_ROOT, USER_PRESET_DIR } from './discovery.ts'
 import { copyComposition, deleteComposition, presetExists, readComposition } from './authoring.ts'
+import { addPresetMcp, setPresetMcpDisabled, updatePresetMcp, type McpRowConfig } from './mcp-rows.ts'
 import { livePresetMounts, mountPreset, serviceForAgent, standingMountFor } from './mount.ts'
 import {
   fileComposition, mountedCompositionRows,
@@ -81,6 +82,10 @@ export {
   type JoinedPresetMount, type PresetMount,
 } from './mount.ts'
 export { copyComposition, deleteComposition, readComposition, writableRoot } from './authoring.ts'
+export {
+  MCP_CLIENT_MODULE, addPresetMcp, setPresetMcpDisabled, updatePresetMcp,
+  type McpRowConfig,
+} from './mcp-rows.ts'
 export { agentPresetProjectionDefinition } from './session.ts'
 export type { AgentPreset, Config, PresetRoot, PresetTrust } from './preset.ts'
 
@@ -603,6 +608,57 @@ export class AgentPresets extends TypertRemoteService {
   async remoteExportDelete(id: string): Promise<void> {
     validatePresetId(id, 'agentPreset')
     await this.remove(id)
+  }
+
+  /**
+   * Add one `mcp-client` row to a user-authored preset's composition file.
+   * @param agentPreset - the preset id.
+   * @param config - the mcp-client entry config (its `serverName` becomes the row id).
+   * @returns once the file is written.
+   * @throws when the preset is unknown, broken, or ships with the deployment.
+   */
+  @Remote('addMcp')
+  async remoteExportAddMcp(agentPreset: string, config: McpRowConfig): Promise<void> {
+    validatePresetId(agentPreset, 'agentPreset')
+    const preset = await this.resolve(agentPreset)
+    await addPresetMcp(preset, config, this.warnRowPatch)
+  }
+
+  /**
+   * Replace one `mcp-client` row's config in a user-authored preset's
+   * composition file.
+   * @param agentPreset - the preset id.
+   * @param serverName - the row id (`serverName`).
+   * @param config - the next mcp-client entry config.
+   * @returns once the file is written.
+   * @throws when the preset is unknown, broken, or ships with the deployment.
+   */
+  @Remote('editMcp')
+  async remoteExportEditMcp(agentPreset: string, serverName: string, config: McpRowConfig): Promise<void> {
+    validatePresetId(agentPreset, 'agentPreset')
+    const preset = await this.resolve(agentPreset)
+    await updatePresetMcp(preset, serverName, config, this.warnRowPatch)
+  }
+
+  /**
+   * Disable or re-enable one `mcp-client` row in a user-authored preset's
+   * composition file.
+   * @param agentPreset - the preset id.
+   * @param serverName - the row id (`serverName`).
+   * @param disabled - whether to disable the row.
+   * @returns once the file is written.
+   * @throws when the preset is unknown, broken, or ships with the deployment.
+   */
+  @Remote('disableMcp')
+  async remoteExportDisableMcp(agentPreset: string, serverName: string, disabled: boolean): Promise<void> {
+    validatePresetId(agentPreset, 'agentPreset')
+    const preset = await this.resolve(agentPreset)
+    await setPresetMcpDisabled(preset, serverName, disabled, this.warnRowPatch)
+  }
+
+  /** Preset-row patch diagnostics, routed to the loader log. */
+  private warnRowPatch = (message: string, ...args: unknown[]): void => {
+    this.ctx.logger.warn(message, ...args)
   }
 
   /**
