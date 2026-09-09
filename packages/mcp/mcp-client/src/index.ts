@@ -56,8 +56,6 @@ export interface StdioConfig {
    * unique across live mcp-client instances.
    */
   serverName: string
-  /** Optional user-facing description shown by the MCP roster. */
-  description?: string
   /** Executable used to start the server. */
   command: string
   /** Arguments passed directly, without shell interpolation. */
@@ -72,11 +70,6 @@ export interface StdioConfig {
   failOnStartupError: boolean
   /** Automatic reconnect policy after a lost connection; omission uses the defaults. */
   reconnect?: ReconnectConfig
-  /**
-   * Authoring metadata shown in the MCP settings roster; never reaches the
-   * model or affects transport behavior.
-   */
-  description?: string
 }
 
 /** Config for connecting to an MCP server over Streamable HTTP (SSE). */
@@ -89,8 +82,6 @@ export interface StreamableHttpConfig {
    * unique across live mcp-client instances.
    */
   serverName: string
-  /** Optional user-facing description shown by the MCP roster. */
-  description?: string
   /** MCP endpoint URL. */
   url: string
   /** Additional headers attached to MCP requests. */
@@ -101,11 +92,6 @@ export interface StreamableHttpConfig {
   failOnStartupError: boolean
   /** Automatic reconnect policy after a lost connection; omission uses the defaults. */
   reconnect?: ReconnectConfig
-  /**
-   * Authoring metadata shown in the MCP settings roster; never reaches the
-   * model or affects transport behavior.
-   */
-  description?: string
 }
 
 /** Configuration for one stdio or Streamable HTTP MCP server. */
@@ -128,7 +114,6 @@ export const Config = z.union([
   z.object({
     transport: z.const('stdio'),
     serverName: z.string().required().pattern(SERVER_NAME_PATTERN),
-    description: z.string().optional(),
     command: z.string().required(),
     args: z.array(String).default([]),
     env: z.dict(String).default({}),
@@ -136,7 +121,6 @@ export const Config = z.union([
     toolCallTimeoutMs: z.number().default(DEFAULT_TOOL_CALL_TIMEOUT_MS),
     failOnStartupError: z.boolean().default(false),
     reconnect: Reconnect,
-    description: z.string(),
   }),
   z.object({
     transport: z.const('streamable-http'),
@@ -146,7 +130,6 @@ export const Config = z.union([
     toolCallTimeoutMs: z.number().default(DEFAULT_TOOL_CALL_TIMEOUT_MS),
     failOnStartupError: z.boolean().default(false),
     reconnect: Reconnect,
-    description: z.string(),
   }),
 ]) as unknown as z<ConfigInput, Config>
 
