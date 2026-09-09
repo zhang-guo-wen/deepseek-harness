@@ -14,9 +14,6 @@
 
 import { chmod, cp, readdir, readFile, rm, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
-import { dump, load } from 'js-yaml'
-import { applyEntryPatches, entryListSchema, type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
-import type { EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { expandHomePath } from '@deepseek-ai/dsh-home-paths'
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
@@ -71,31 +68,6 @@ export function writableRoot(roots: readonly PresetRoot[], presetId: string): st
  */
 export async function readComposition(preset: AgentPreset): Promise<string> {
   return await readFile(preset.path, 'utf8')
-}
-
-/**
- * Apply one row mutation to a user-authored preset's composition file and write
- * it back atomically. Shipped presets are refused: they belong to the
- * deployment. The mutation reuses the Loader's patch dialect
- * ({@link applyEntryPatches}), so `insert` blocks and `!!js` disabled
- * expressions round-trip unchanged.
- * @param preset - the resolved preset to edit.
- * @param patch - the row patch (update `config`/`disabled`, or `insert` to add).
- * @param warn - sink for skipped-patch diagnostics (printf-style, `%C` = code).
- * @returns a promise resolving after the file is written.
- * @throws when the preset is not user-writable or the file cannot be read/written.
- */
-export async function writeComposition(
-  preset: AgentPreset,
-  patch: PatchOptions,
-  warn: (message: string, ...args: unknown[]) => void,
-): Promise<void> {
-  if (preset.trust !== 'user') {
-    throw notWritable(preset.id, 'it ships with the deployment')
-  }
-  const raw = load(await readFile(preset.path, 'utf8'), { schema: entryListSchema }) as EntryOptions[]
-  const next = applyEntryPatches(raw, [patch], warn)
-  await writeFileAtomic(preset.path, dump(next, { schema: entryListSchema }), { mode: 0o600, dirMode: 0o700 })
 }
 
 /** Whether anything occupies the path (cp's own errorOnExist backstops races). */

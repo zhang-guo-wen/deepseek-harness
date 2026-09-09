@@ -19,8 +19,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import AgentPresets, {
   COMPOSITION_FILE, copyComposition, METADATA_FILE, type Config,
 } from '@deepseek-ai/dsh-agent-presets'
-import { writeComposition } from '../src/authoring.ts'
-import { fileComposition } from '../src/composition-inventory.ts'
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), 'fixtures')
 const VALID = '- id: tool-alpha\n  name: ../../plugins/contribute.js\n  config:\n    tool: alpha\n'
@@ -328,60 +326,5 @@ describe('a ghost directory under the user root', () => {
     // no real preset does and which no copy can carry — so the claim here is
     // the reclaimed id and the restored composition, not the rows' targets.
     expect(existsSync(join(userRoot, 'ghost', COMPOSITION_FILE))).toBe(true)
-  })
-})
-
-describe('writeComposition row editing', () => {
-  const alwaysEnabled = () => false
-  const mcps = (rows: string[]) => rows.join('\n')
-
-  it('disables a flat row and writes it back atomically', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'dsh-preset-write-'))
-    roots.push(dir)
-    const path = join(dir, COMPOSITION_FILE)
-    await writeFile(path, mcps([
-      '- id: memory-engram',
-      "  name: '@deepseek-ai/dsh-mcp-client'",
-      '  config:',
-      '    transport: stdio',
-      '    serverName: engram',
-      '    command: engram',
-      '    args: [mcp]',
-    ]))
-    const preset = { id: 'mcp', trust: 'user' as const, path } as Parameters<typeof writeComposition>[0]
-
-    await writeComposition(preset, { id: 'memory-engram', disabled: true }, () => {})
-    const result = await fileComposition(path, alwaysEnabled)
-    expect('rows' in result && result.rows[0]?.enabled).toBe(false)
-  })
-
-  it('inserts a new mcp-client row and writes it back', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'dsh-preset-write-'))
-    roots.push(dir)
-    const path = join(dir, COMPOSITION_FILE)
-    await writeFile(path, mcps([
-      '- id: memory-engram',
-      "  name: '@deepseek-ai/dsh-mcp-client'",
-      '  config:',
-      '    transport: stdio',
-      '    serverName: engram',
-    ]))
-    const preset = { id: 'mcp', trust: 'user' as const, path } as Parameters<typeof writeComposition>[0]
-
-    await writeComposition(preset, {
-      insert: [{
-        id: 'context7',
-        name: '@deepseek-ai/dsh-mcp-client',
-        config: { transport: 'stdio', serverName: 'context7', command: 'npx', args: ['-y', '@upstash/context7-mcp'] },
-      }],
-    }, () => {})
-    const result = await fileComposition(path, alwaysEnabled)
-    const mods = 'rows' in result ? result.rows.map(row => row.entryId) : []
-    expect(mods).toEqual(['memory-engram', 'context7'])
-  })
-
-  it('refuses to write a shipped preset', async () => {
-    const preset = { id: 'standard', trust: 'system' as const, path: '/tmp/never.yml' } as Parameters<typeof writeComposition>[0]
-    await expect(writeComposition(preset, { id: 'x', disabled: true }, () => {})).rejects.toThrow(/cannot be written/)
   })
 })
