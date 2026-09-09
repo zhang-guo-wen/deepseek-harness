@@ -27,6 +27,8 @@ tmp/
 .idea
 mise.toml
 dist-exe/
+dist-windows-web/
+python/sdk-runtime/src/deepseek_harness_runtime/runtime/dsh-jsonrpc-agent-*
 /dist/
 apps/desktop/.desktop-build/
 python/sdk-runtime/src/deepseek_harness_runtime/runtime/deepseek-harness-sdk-runtime-*
