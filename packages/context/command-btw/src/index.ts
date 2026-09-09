@@ -1,78 +1,62 @@
 /**
- * Human-facing `/btw` ("by the way") command: an ephemeral side question
- * answered from the current session context.
+ * Human-facing `/btw` ("by the way") command: forks a continuable child
+ * subagent that answers a side question as its own sub-task session.
  *
- * The handler runs one model request over the session log's derived history
- * plus the session's own assembled system prompt, with NO tool schemas, and
- * never publishes the question or the answer into the durable model surface.
- * The question and the exact request are recorded as a log-only `btw/request`
- * event so the model-visible input stays reconstructable, while
- * `session.deriveMessages()` is left unchanged — the exchange is ephemeral,
- * mirroring Claude Code's `/btw`.
+ * The handler does NOT answer the question in the current session. It forks a
+ * continuable subagent on `ctx.subagents` (provider `fork` by default), which
+ * inherits the parent session's completed-turn prefix as seed, delivers the
+ * question as the child's initial prompt, and records a log-only `btw/spawn`
+ * event carrying the child id. The parent session shows only a short "started
+ * /btw, child session {id}" acknowledgement; the answer lives in the child
+ * sub-task session and is never a model-surface message of the parent.
+ *
+ * The fork requires a fully balanced history: if the parent session has an
+ * in-progress turn (no matching `turn/end`), or has completed no turn at all,
+ * the command refuses so the child always inherits a complete prefix.
  *
  * @module @deepseek-ai/dsh-command-btw
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { assembleContextFor } from '@deepseek-ai/dsh-agent'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
-import { BlockAssembler, createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { GenerateOptions, Message } from '@deepseek-ai/dsh-llm'
-import type { FinishReason } from '@deepseek-ai/dsh-llm'
-import { SessionLogOffset } from '@deepseek-ai/dsh-session'
-import type { Session, SessionEventMap } from '@deepseek-ai/dsh-session'
-import { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
-import { deadline } from '@deepseek-ai/dsh-timeout'
+import type { SessionEventMap } from '@deepseek-ai/dsh-session'
+import type { SessionId } from '@deepseek-ai/dsh-session'
+// Activate Context.subagents and Context.sessionProjections module augmentations.
+import type {} from '@deepseek-ai/dsh-subagent'
+import type {} from '@deepseek-ai/dsh-session-projection'
 
 export const name = 'command-btw'
-export const inject = ['commands', 'llm', 'systemPrompt']
+export const inject = ['commands', 'sessionProjections', 'subagents']
 
 const USAGE = 'Usage: /btw <question>'
 
-/** Capability-owned timeout reason code for a `/btw` request. */
-export const BTW_TIMEOUT_CODE = 'BTW_TIMEOUT'
-
-/** Deployment policy for one `/btw` answer. */
+/** Deployment policy for one `/btw` fork. */
 export interface Config {
-  /** Maximum UTF-8 bytes in the appended side question. */
+  /** Maximum UTF-8 bytes in the side question. */
   maxQuestionBytes?: number
-  /** Auxiliary generation output-token cap. */
-  maxOutputTokens?: number
-  /** End-to-end request deadline in milliseconds. */
-  timeoutMs?: number
-  /** Optional explicit provider route; must be paired with `model`. */
+  /** The `ctx.subagents` fork provider name (default `fork`). */
   provider?: string
-  /** Optional explicit model id; must be paired with `provider`. */
-  model?: string
 }
 
 /** Validated immutable deployment policy. */
 export interface ResolvedConfig {
-  /** Maximum UTF-8 bytes in the appended side question. */
+  /** Maximum UTF-8 bytes in the side question. */
   maxQuestionBytes: number
-  /** Auxiliary generation output-token cap. */
-  maxOutputTokens: number
-  /** End-to-end request deadline in milliseconds. */
-  timeoutMs: number
-  /** Optional explicit provider route; must be paired with `model`. */
-  provider?: string
-  /** Optional explicit model id; must be paired with `provider`. */
-  model?: string
+  /** The `ctx.subagents` fork provider name. */
+  provider: string
 }
 
-/** Library defaults for the optional numeric limits. */
+/** Library default for the optional question byte cap. */
 const DEFAULT_MAX_QUESTION_BYTES = 4096
-const DEFAULT_MAX_OUTPUT_TOKENS = 256
-const DEFAULT_TIMEOUT_MS = 30_000
+
+/** Library default for the `ctx.subagents` fork provider name. */
+const DEFAULT_PROVIDER = 'fork'
 
 /** Loader field schemas with library defaults. */
 export const ConfigFields = {
   maxQuestionBytes: z.number().step(1).min(1).default(DEFAULT_MAX_QUESTION_BYTES),
-  maxOutputTokens: z.number().step(1).min(1).default(DEFAULT_MAX_OUTPUT_TOKENS),
-  timeoutMs: z.number().step(1).min(1).default(DEFAULT_TIMEOUT_MS),
-  provider: z.string(),
-  model: z.string(),
+  provider: z.string().min(1).default(DEFAULT_PROVIDER),
 }
 
 /** Loader schema for the `/btw` plugin. */
@@ -80,43 +64,32 @@ export const Config: z<Config> = z.object(ConfigFields)
 
 const CONFIG_KEYS: ReadonlySet<string> = new Set([
   'maxQuestionBytes',
-  'maxOutputTokens',
-  'timeoutMs',
   'provider',
-  'model',
 ])
 
-/** The exact model-visible request recorded before one `/btw` dispatch. */
-export interface BtwRequestEventData {
-  /** The trimmed side question. */
+/** The log-only record of one `/btw` fork dispatch. */
+export interface BtwSpawnEventData {
+  /** The trimmed side question delivered to the child. */
   question: string
-  /** Log offset the request snapshotted at; prior events rebuild the history. */
-  atSeq: SessionLogOffset
-  /** Exact auxiliary LLM route used for the answer. */
-  route: { provider: string; model: string }
-  /** Exact assembled system prompt for the session. */
-  system: string
-  /** Exact auxiliary output-token cap. */
-  maxTokens: number
+  /** The durable child session id that owns the answer. */
+  childId: SessionId
 }
 
 declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
     /**
-     * Log-only pre-dispatch record of one `/btw` model request. The history is
-     * the session log up to `atSeq`; the question is `question`. The answer is
-     * later carried by the paired `command/done` text. Neither the question nor
-     * the answer is a durable model-surface message, so this event is the
-     * reconstructable record of what reached the model.
+     * Log-only record that a `/btw` command forked a continuable child subagent
+     * and delivered `question` to it. The answer lives in `childId`. The parent
+     * session publishes no model-surface message for the exchange.
      */
-    'btw/request': BtwRequestEventData
+    'btw/spawn': BtwSpawnEventData
   }
 }
 
 /**
  * Validate and detach required `/btw` configuration.
  * @param config - untrusted plugin configuration.
- * @returns immutable policy with library defaults and optional route absence preserved.
+ * @returns immutable policy with library defaults applied.
  */
 export function resolveConfig(config: Config): ResolvedConfig {
   const candidate: unknown = config
@@ -127,93 +100,57 @@ export function resolveConfig(config: Config): ResolvedConfig {
   for (const key of Object.keys(value)) {
     if (!CONFIG_KEYS.has(key)) throw new Error(`command-btw: unknown config key "${key}"`)
   }
-  // Apply library defaults, then validate the limits explicitly; the provider
-  // /model pairing check follows because neither field is individually required.
   const maxQuestionBytes = value.maxQuestionBytes ?? DEFAULT_MAX_QUESTION_BYTES
-  const maxOutputTokens = value.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS
-  const timeoutMs = value.timeoutMs ?? DEFAULT_TIMEOUT_MS
   if (!Number.isSafeInteger(maxQuestionBytes) || maxQuestionBytes <= 0) {
     throw new Error('command-btw: maxQuestionBytes must be a positive integer')
   }
-  if (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens <= 0) {
-    throw new Error('command-btw: maxOutputTokens must be a positive integer')
+  const provider = value.provider ?? DEFAULT_PROVIDER
+  if (typeof provider !== 'string' || provider.length === 0) {
+    throw new Error('command-btw: provider must be a non-empty string')
   }
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
-    throw new Error('command-btw: timeoutMs must be a positive integer')
-  }
-  const hasProvider = value.provider !== undefined
-  const hasModel = value.model !== undefined
-  if (hasProvider !== hasModel) {
-    throw new Error('command-btw: provider and model must be supplied together')
-  }
-  if (hasProvider
-    && (typeof value.provider !== 'string' || value.provider.length === 0
-      || typeof value.model !== 'string' || value.model.length === 0)) {
-    throw new Error('command-btw: provider and model overrides must be non-empty strings')
-  }
-  return Object.freeze({
-    maxQuestionBytes,
-    maxOutputTokens,
-    timeoutMs,
-    ...value.provider === undefined ? {} : { provider: value.provider },
-    ...value.model === undefined ? {} : { model: value.model },
-  })
-}
-
-/** Translate a terminal finish reason into a `/btw` answer failure. */
-function finishError(finish: FinishReason): Error | undefined {
-  switch (finish.kind) {
-    case 'stop':
-      return undefined
-    case 'error':
-    case 'aborted': {
-      const error = new Error(finish.failure.message) as Error & { code?: string }
-      error.code = finish.failure.code
-      return error
-    }
-    case 'max-tokens':
-      return new Error('command-btw: answer reached maxOutputTokens')
-    case 'tool-calls':
-      return new Error('command-btw: answer unexpectedly requested a tool')
-    default:
-      return new Error(`command-btw: unsupported finish reason "${String((finish as { kind?: unknown }).kind)}"`)
-  }
-}
-
-/** Resolve the explicit pair or the exact route captured from `request/header`. */
-function resolveRoute(
-  config: ResolvedConfig,
-  session: Session,
-): { provider: string; model: string } {
-  if (config.provider !== undefined && config.model !== undefined) {
-    return { provider: config.provider, model: config.model }
-  }
-  const header = session.requestHeader()
-  if (header === undefined) {
-    throw new Error('command-btw: no logged request route is available; configure provider and model together')
-  }
-  const route = (header.config as { provider?: unknown; model?: unknown } | undefined)
-  if (route === undefined || typeof route.provider !== 'string' || typeof route.model !== 'string') {
-    throw new Error('command-btw: the logged request route is incomplete; configure provider and model together')
-  }
-  return { provider: route.provider, model: route.model }
+  return Object.freeze({ maxQuestionBytes, provider })
 }
 
 /**
- * Answer one `/btw` question from the current session context.
+ * Whether the session is unsuitable to fork from: either a turn is still open
+ * (`turn/start` without a matching `turn/end`) or no turn has ever completed
+ * (`lastTurn` is 0). Under the strict balanced-history requirement a fork is
+ * refused in both cases, so the child always inherits a complete, closed
+ * prefix.
+ * @param session - the session to inspect.
+ * @param ctx - context exposing the `turnBoundary` projection.
+ * @returns a human-readable reason, or undefined when the history is balanced.
+ */
+function unbalancedForkReason(
+  ctx: Context,
+  session: Parameters<typeof ctx.sessionProjections.stateOf>[0],
+): string | undefined {
+  const state = ctx.sessionProjections.stateOf(session, 'turnBoundary')
+  if (state === undefined) return undefined
+  if (state.openTurnStartSeq !== null) {
+    return '/btw requires a balanced history; wait for the current turn to finish before forking a side question.'
+  }
+  if (state.lastTurn === 0) {
+    return '/btw requires at least one completed turn to fork from; finish a turn first.'
+  }
+  return undefined
+}
+
+/**
+ * Fork one `/btw` question as a continuable child subagent.
  *
- * The request reuses the session's derived history and its assembled system
- * prompt but attaches no tool schemas, so the answer is read-only. The
- * question and the request are recorded as a log-only `btw/request` event;
- * neither is published as a durable model-surface message, so
- * `session.deriveMessages()` is unchanged. The answer returns to the caller as
- * the command result text.
- * @param ctx - context exposing the LLM, system-prompt, and command services.
+ * The handler refuses empty or oversized questions, an in-progress parent
+ * turn, and a session with no completed turn, so the child always inherits a
+ * fully balanced prefix. It then calls `ctx.subagents.startContinuable` on the
+ * configured fork provider, records a log-only `btw/spawn` event with the
+ * child id, and returns a short acknowledgement. The answer and any follow-up
+ * conversation live in the child session.
+ * @param ctx - context exposing the commands, subagents, and projection services.
  * @param config - validated deployment policy.
  * @param invocation - receiving agent, raw command input, and UI cancellation.
  * @returns the settled command result.
  */
-async function answerBtw(
+async function forkBtw(
   ctx: Context,
   config: ResolvedConfig,
   invocation: CommandInvocation,
@@ -226,53 +163,35 @@ async function answerBtw(
     return { kind: 'error', text: `The question exceeds the ${config.maxQuestionBytes}-byte limit.` }
   }
   const session = invocation.agent.session
-  const history = session.deriveMessages()
-  const questionMessage = createUserMessage({
-    content: [{ type: 'text', text: question }],
-    source: { kind: 'plugin', plugin: 'command-btw', form: 'notice', summary: question },
+  const unbalanced = unbalancedForkReason(ctx, session)
+  if (unbalanced !== undefined) {
+    return { kind: 'error', text: unbalanced }
+  }
+  const provider = ctx.subagents.getProvider(config.provider)
+  if (provider === undefined) {
+    return { kind: 'error', text: `/btw is unavailable: no "${config.provider}" subagent provider is registered.` }
+  }
+  if (provider.prepareContinuable === undefined) {
+    return { kind: 'error', text: `/btw is unavailable: the "${config.provider}" provider cannot create continuable children.` }
+  }
+  const label = `btw: ${question.slice(0, 80)}`
+  const started = await ctx.subagents.startContinuable({
+    provider: config.provider,
+    label,
+    request: {
+      prompt: [{ type: 'text', text: `Answer this side question from the parent context: ${question}` }],
+      parent: invocation.agent,
+    },
+    signal: invocation.signal,
   })
-  const messages: Message[] = [...history, questionMessage]
-  const atSeq = session.seq
-  const assembly = await ctx.systemPrompt.assemble(assembleContextFor(invocation.agent, invocation.signal))
-  invocation.signal.throwIfAborted()
-  const system = renderPrompt(assembly)
-  const route = resolveRoute(config, session)
-  using callDeadline = deadline(invocation.signal, config.timeoutMs, BTW_TIMEOUT_CODE)
-  const options: GenerateOptions = {
-    provider: route.provider,
-    model: route.model,
-    system,
-    messages,
-    maxTokens: config.maxOutputTokens,
-    sessionId: session.id,
-    signal: callDeadline.signal,
-  }
-  invocation.agent.session.append('btw/request', {
+  invocation.agent.session.append('btw/spawn', {
     question,
-    atSeq,
-    route,
-    system,
-    maxTokens: config.maxOutputTokens,
-  } satisfies SessionEventMap['btw/request'])
-  callDeadline.signal.throwIfAborted()
-  const assembler = new BlockAssembler()
-  for await (const chunk of ctx.llm.stream(options)) {
-    callDeadline.signal.throwIfAborted()
-    assembler.push(chunk)
+    childId: started.childId,
+  } satisfies SessionEventMap['btw/spawn'])
+  return {
+    kind: 'success',
+    text: `Started /btw as child session ${started.childId}. The answer and any follow-up live there.`,
   }
-  callDeadline.signal.throwIfAborted()
-  const terminalError = finishError(assembler.finish)
-  if (terminalError !== undefined) throw terminalError
-  const blocks = assembler.blocks()
-  if (blocks.some(block => block.type === 'tool-call')) {
-    throw new Error('command-btw: answer must contain text only')
-  }
-  const text = blocks
-    .filter((block): block is Extract<(typeof blocks)[number], { type: 'text' }> => block.type === 'text')
-    .map(block => block.text)
-    .join(' ')
-  if (text.trim().length === 0) throw new Error('command-btw: answer produced no text')
-  return { kind: 'success', text }
 }
 
 /** Register the global `/btw` command for every composed command adapter. */
@@ -280,9 +199,9 @@ export function apply(ctx: Context, config: Config = {}): void {
   const resolved = resolveConfig(config)
   ctx.commands.register({
     name: 'btw',
-    description: 'by the way: answer a side question from the current context',
+    description: 'by the way: fork a child subagent to answer a side question',
     input: { hint: '<question>' },
     recordInput: false,
-    handler: invocation => answerBtw(ctx, resolved, invocation),
+    handler: invocation => forkBtw(ctx, resolved, invocation),
   })
 }

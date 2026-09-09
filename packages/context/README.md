@@ -26,7 +26,7 @@ The context group provides plugins that add model-visible context to each reques
 |---|---|---|
 | [`agent-instructions/`](agent-instructions/README.md) | Loads `AGENTS.md`/`CLAUDE.md` workspace instructions into context and refreshes them after file edits | — |
 | [`claude-compat/`](claude-compat/README.md) | Discovers Claude Code `.claude/skills`, `CLAUDE.md`, and `.claude/rules/**` so they reach the harness | — |
-| [`command-btw/`](command-btw/README.md) | A `/btw` side question answered from the current session context without entering model history | — |
+| [`command-btw/`](command-btw/README.md) | A `/btw` side question answered by a forked child subagent, without entering the parent's model history | — |
 | [`session-reference/`](session-reference/README.md) | References other sessions: mention one and its bounded read-only snapshot becomes context | `ctx.sessionReferenceResolver` |
 | [`file-reference/`](file-reference/README.md) | `@file` mention discovery and the shared mention grammar for host-backed UIs | `ctx.fileReferences` |
 | [`file-reference-local/`](file-reference-local/README.md) | Local-workspace completion provider for `@file` mentions | — |

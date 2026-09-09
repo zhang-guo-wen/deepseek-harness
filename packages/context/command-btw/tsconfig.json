@@ -24,16 +24,16 @@
       "path": "../../core/session"
     },
     {
-      "path": "../../core/system-prompt"
+      "path": "../../core/agent-loop"
     },
     {
       "path": "../../interaction/commands"
     },
     {
-      "path": "../../llm/llm"
+      "path": "../../session/session-projection"
     },
     {
-      "path": "../../util/timeout"
+      "path": "../../subagent/subagent"
     }
   ]
 }

@@ -6,40 +6,39 @@ Status: implemented
 
 ## 问题
 
-Claude Code 的 `/btw`（"by the way"）让用户能在任务运行中提问旁路问题，从会话当前上下文作答，无需工具，也不进入对话历史。harness 此前没有对应物：旁路问题要么变成普通模型回合（污染历史），要么成为固定的产品功能。
+Claude Code 的 `/btw`（"by the way"）让用户能在任务运行中提出旁路问题。问题不应打扰进行中的工作，答案也不应进入父会话的历史。harness 此前没有对应物：旁路问题要么变成普通模型回合（污染历史），要么成为固定的产品功能。
 
-需要的是一个复用会话上下文、只读、并把交换以"对模型可见可重建但绝非持久模型表面消息"的方式记录的命令。
+期望的行为是把问题作为自己的子任务来回答——一个用户可以打开并继续的会话——而父会话只记录旁路问题已启动，不显示答案文本。
 
 ## 决策
 
-新增 `packages/context/command-btw`，一个在 `ctx.commands` 上注册全局 `/btw` 命令的小型指令生产插件。handler 运行一次性 LLM 请求，请求基于会话的派生历史加上追加的问题，以及会话组装的系统提示词，不带任何工具 schema。分发前将请求记录为仅日志的 `btw/request` 会话事件，答案以命令结果文本返回。问题和答案都不作为 `user/message` 或 `assistant/message` 追加，因此 `session.deriveMessages()` 不变——该交换是临时的。
+新增 `packages/context/command-btw`，一个在 `ctx.commands` 上注册全局 `/btw` 命令的小型指令生产插件。handler 本身不回答问题。它在 `ctx.subagents` 上用配置的分叉提供方（默认 `fork`）分叉一个可继续对话的子代理，该提供方用父会话已完成的回合前缀作为 seed 播种子代理，并把问题作为子代理的初始提示词投递。它记录一个携带子 id 的仅日志 `btw/spawn` 会话事件，并返回简短确认。问题和答案都不会成为父会话的 `user/message` 或 `assistant/message`，因此父会话的 `session.deriveMessages()` 不变。
 
-答案契约：
+分叉契约：
 
-- `messages` 是 `session.deriveMessages()` 加上裁剪后的问题作为最后一条用户消息。
-- `system` 是 `renderPrompt(await systemPrompt.assemble(assembleContextFor(agent)))` —— 会话自身组装的提示词，不带工具 schema。
-- 路由在设置 `config.provider`/`config.model` 时取之，否则取会话最近一次 `request/header` 的路由。
-- `btw/request` 在分发前追加，携带 `{ question, atSeq, route, system, maxTokens }`；`atSeq` 之前的历史可重建 `messages`。
-- 仅文本块呈现；`max-tokens` 结束、空或超大的问题，或自相矛盾请求工具的答案都会大声失败。
+- handler 要求父会话历史平衡：当 `turnBoundary.openTurnStartSeq` 非空（有打开回合）或 `turnBoundary.lastTurn` 为 0（无已完成回合）时拒绝。这保证子代理总能继承一个完整、闭合的前缀。
+- 它确认提供方已注册（`ctx.subagents.getProvider`）且支持可继续子代理（存在 `prepareContinuable`）。
+- `ctx.subagents.startContinuable({ provider, label, request: { label, prompt, parent }, signal })` 返回 `{ childId, messageId }`。
+- `btw/spawn` 在 inbox 接受后追加，携带 `{ question, childId }`。
 
-该插件是函数插件（`name`/`inject`/`Config`/`apply`），`inject = ['commands', 'llm', 'systemPrompt']`。它随 `dsh-base` 交付，因此 Web 客户端开箱即可用 `/btw`。`headless`、`acp`、`json-rpc` 入口不提供命令适配器，因此 `/btw` 在那里不可用。
+该插件是函数插件（`name`/`inject`/`Config`/`apply`），`inject = ['commands', 'sessionProjections', 'subagents']`。它随 `dsh-base` 交付，因此 Web 客户端开箱即可用 `/btw`。`headless`、`acp`、`json-rpc` 入口不提供命令适配器，因此 `/btw` 在那里不可用。
 
 ### 配置
 
-`maxQuestionBytes`、`maxOutputTokens`、`timeoutMs` 是带库默认值（4096 / 256 / 30000）的数值上限。`provider` 与 `model` 可选且必须成对提供；省略时路由从会话的 `request/header` 读取。
+`maxQuestionBytes`（默认 4096）是问题字节上限；`provider`（默认 `fork`）命名 `ctx.subagents` 的分叉提供方。
 
 ## 考虑过的替代方案
 
-**复用 `ctx.commands`，让 `/btw` 跑普通模型回合。** 不予采用，因为普通回合会把问题与答案追加为持久模型表面消息，破坏定义 `/btw` 的临时属性。
+**在父会话中用一次 LLM 调用回答问题。** 不予采用，因为用户要求旁路问题作为自己的、可分叉的子任务，而非父会话中的内联答案。
 
-**不记录任何事件，依赖日志隐式承载交换。** 不予采用。命令会到达模型，因此对模型可见的输入必须保持可重建；省略事件会使命令的问题无法从日志重建。
+**在父会话中用普通模型回合回答问题。** 不予采用，因为普通回合会将问题与答案追加为持久模型表面消息，污染父会话历史。
 
-**把 `/btw` 注册为受保护 subagent 或工具调用。** 不予采用。`/btw` 定义上就是只读的（无工具、无新上下文），给它工具访问或全新 subagent 上下文会改变其含义。
+**不记录任何事件，依赖日志隐式承载分叉。** 不予采用。分叉是对 `ctx.subagents` 的真实操作，因此 `btw/spawn` 事件记录子 id 与问题，使该操作保持可重建。
 
-**为 `/btw` 调用给 `GenerateOptions` 新增一个 `purpose` 值。** 本次变更不采用。辅助调用无需 purpose 值即可进行；purpose 只是提供方提示，尚无提供方需要它。
+**总是允许分叉，即使历史为空或打开。** 不予采用，因为用不完整前缀播种的子代理不会是合法会话。
 
 ## 后果
 
-该交换是临时的，且不在 `deriveMessages()` 中，与 Claude Code 一致。问题与答案仅以命令行与答案文本呈现，因此后续请求无法基于 `/btw` 答案推理；任何需要工具或跟进的内容应走普通回合。仅日志的 `btw/request` 事件在"对模型可见即已记录"不变量下保持模型可见输入可重建，同时不重复消息历史。该命令在已交付入口中仅限 Web，且受其配置上限约束。
+旁路问题成为用户可打开并继续的独立子任务会话；父会话只记录 `btw/spawn`、`command/run` 与 `command/done`，均为仅日志。答案与任何后续对话都在子会话中，因此父会话模型看不到该交换，其 `deriveMessages()` 不变，父会话的请求缓存也不被失效。子代理复用父会话的已完成回合前缀，因此其首个请求符合提示词缓存复用条件。该命令在已交付入口中仅限 Web，需要可继续分叉提供方，并要求父会话历史平衡，因此无法在任务进行中使用。
 
-recorded-session snapshot 固定其临时性；该命令的单元测试覆盖 handler、配置校验，以及 max-token 与空问题错误路径。
+命令的单元测试覆盖 handler、配置校验、空/超大问题错误路径、打开回合拒绝、无已完成回合拒绝，以及记录 `btw/spawn` 与子 id 的分叉。
