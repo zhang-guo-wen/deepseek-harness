@@ -10,6 +10,10 @@ export interface DesktopTrayOptions {
   readonly locale: () => DesktopLocale
   /** Show and focus the primary window. */
   readonly open: () => void
+  /** Show the quick-input panel, or hide it when it is already on screen. */
+  readonly toggleQuickInput: () => void
+  /** Whether the quick-input panel is on screen, rendered as the toggle's checked state. */
+  readonly quickInputVisible: () => boolean
   /** Request quit through the same confirmation as every other quit entry. */
   readonly quit: () => void
 }
@@ -18,7 +22,7 @@ export interface DesktopTrayOptions {
 export class DesktopTray {
   private tray: Tray | undefined
 
-  /** @param options - Icon path, locale reader, and the open and quit actions. */
+  /** @param options - Icon path, locale reader, and the open, quick-input, and quit actions. */
   constructor(private readonly options: DesktopTrayOptions) {
     const tray = new Tray(nativeImage.createFromPath(options.iconPath))
     this.tray = tray
@@ -34,6 +38,13 @@ export class DesktopTray {
     tray.setToolTip(messages.aboutProduct)
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: messages.openApplication, click: () => { this.options.open() } },
+      {
+        label: messages.quickInputMenu,
+        type: 'checkbox',
+        checked: this.options.quickInputVisible(),
+        // The menu is rebuilt so the check mark follows the panel the action just toggled.
+        click: () => { this.options.toggleQuickInput(); this.relabel() },
+      },
       { type: 'separator' },
       { label: messages.quitApplication, click: () => { this.options.quit() } },
     ]))

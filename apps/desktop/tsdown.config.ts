@@ -67,6 +67,23 @@ export default defineConfig([
           },
         },
       })
+      await build({
+        configFile: false,
+        root: fileURLToPath(new URL('.', import.meta.url)),
+        esbuild: { jsx: 'automatic' },
+        define: { 'process.env.NODE_ENV': JSON.stringify('production') },
+        build: {
+          outDir: 'lib/quick-input',
+          emptyOutDir: true,
+          lib: {
+            entry: 'src/client/quick-input.tsx',
+            formats: ['iife'],
+            name: 'DesktopQuickInput',
+            fileName: () => 'quick-input.js',
+            cssFileName: 'quick-input',
+          },
+        },
+      })
     },
     outDir: 'lib',
     format: ['esm'],
@@ -77,7 +94,7 @@ export default defineConfig([
     clean: false,
     deps: { neverBundle: ['electron'] },
   },
-  ...(['preload-app', 'preload-welcome', 'preload-platform-account', 'preload-mandatory', 'preload-update-dialog'] as const).map(name => ({
+  ...(['preload-app', 'preload-welcome', 'preload-platform-account', 'preload-mandatory', 'preload-update-dialog', 'preload-quick-input'] as const).map(name => ({
     // Sandboxed Electron preloads run as CommonJS even though the application package is ESM.
     entry: { [name]: `lib/types/${name}.js` },
     plugins: [packagedImportsPlugin(preloadImports)],

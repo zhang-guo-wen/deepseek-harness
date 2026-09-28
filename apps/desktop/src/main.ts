@@ -55,6 +55,8 @@ import { installDesktopShortcuts } from './keyboard.ts'
 import { DesktopUpdateOverlays } from './update-overlay.ts'
 import { DesktopQuitConfirmation } from './quit-confirmation.ts'
 import { DesktopTray } from './tray.ts'
+import { DesktopQuickInput } from './quick-input-window.ts'
+import { QUICK_PROMPT_PATH, QUICK_PROMPT_REQUEST_MS, parseQuickPromptResponse, type QuickPromptRequest, type QuickPromptResult } from './quick-input-api.ts'
 import { DesktopBackgroundNotice } from './background-notice.ts'
 
 let focusPrimaryWindow = (): void => {}
@@ -913,6 +915,42 @@ async function main(): Promise<void> {
       { role: 'hideOthers', label: currentDesktopLocale().messages.hideOtherApplications },
       { role: 'unhide', label: currentDesktopLocale().messages.showAllApplications }, { type: 'separator' }]
     : []
+  /**
+   * Post one quick-input draft to the Desktop Host, which owns Session
+   * selection. The authenticated cookie stays in this process: the panel
+   * renderer never reaches the Host itself.
+   */
+  const submitQuickPrompt = async (text: string): Promise<QuickPromptResult> => {
+    if (hostUrl === undefined || hostCookie === undefined) return { ok: false, failure: 'unavailable' }
+    const request: QuickPromptRequest = { text }
+    let response: Response
+    try {
+      response = await fetch(new URL(QUICK_PROMPT_PATH, hostUrl), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie: hostCookie },
+        body: JSON.stringify(request),
+        signal: AbortSignal.timeout(QUICK_PROMPT_REQUEST_MS),
+      })
+    } catch (_unreachableHost: unknown) {
+      return { ok: false, failure: 'unavailable' }
+    }
+    try {
+      return parseQuickPromptResponse(await response.json())
+    } catch (_malformedBody: unknown) {
+      // Anything other than this route's JSON means the Host is not answering it yet.
+      return { ok: false, failure: 'unavailable' }
+    }
+  }
+  const quickInput = new DesktopQuickInput({
+    locale: currentDesktopLocale,
+    submit: submitQuickPrompt,
+    restoreFocus: () => { focusPrimaryWindow() },
+  })
+  /** Show or hide the panel, keeping the tray's check mark on the panel it just toggled. */
+  const toggleQuickInput = (): void => {
+    quickInput.toggle()
+    tray?.relabel()
+  }
   const applicationItems = (): MenuItemConstructorOptions[] => [
     // Windows has no system About panel; Electron's fallback is a plain
     // message box, so the shell shows its own dimmed dialog instead.
@@ -922,6 +960,7 @@ async function main(): Promise<void> {
       : { label: currentDesktopLocale().messages.aboutMenu, role: 'about' },
     { type: 'separator' },
     { label: currentDesktopLocale().messages.checkUpdatesMenu, click: () => { void openUpdatePrompt(true) } },
+    { label: currentDesktopLocale().messages.quickInputMenu, click: () => { toggleQuickInput() } },
     ...development ? [
       { type: 'separator' as const },
       { label: currentDesktopLocale().messages.reloadPageMenu, role: 'reload' as const },
@@ -953,7 +992,10 @@ async function main(): Promise<void> {
     // The tray is the way back to a hidden window; without it, relaunching the application still focuses it.
     try {
       tray = new DesktopTray({ iconPath: trayIconPath, locale: currentDesktopLocale,
-        open: () => { focusPrimaryWindow() }, quit: () => { app.quit() } })
+        open: () => { focusPrimaryWindow() },
+        toggleQuickInput,
+        quickInputVisible: () => quickInput?.visible === true,
+        quit: () => { app.quit() } })
     } catch (error) { console.warn('desktop tray: unavailable', error) }
   }
   const backgroundNotice = process.platform === 'win32'
@@ -1212,6 +1254,7 @@ async function main(): Promise<void> {
     quitConfirmation.dispose()
     backgroundNotice?.dispose()
     tray?.dispose()
+    quickInput?.dispose()
     stopAccount?.()
     if (welcomeWindow !== undefined && !welcomeWindow.isDestroyed()) welcomeWindow.hide()
     if (mainWindow !== undefined && !mainWindow.isDestroyed()) mainWindow.hide()
@@ -1230,6 +1273,7 @@ async function main(): Promise<void> {
       backgroundNotice?.dispose()
       updateJournal?.action('quit-requested')
       tray?.dispose()
+      quickInput?.dispose()
       updateDialog.dispose()
       mandatoryUI?.dispose()
       // Installation preparation already awaited Platform storage cleanup.

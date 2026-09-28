@@ -139,6 +139,14 @@ export const en = {
   mandatoryCopyFailed: 'Could not copy the link. Select and copy it below.',
   mandatoryAddress: 'Download link',
   mandatoryNotification: 'Return to the application to confirm installation and restart.',
+  quickInputMenu: 'Quick Input',
+  quickInputTitle: 'Quick Input',
+  quickInputPlaceholder: 'Send a message to the active task…',
+  quickInputSend: 'Send',
+  quickInputEmpty: 'Type a message first.',
+  quickInputNoSession: 'No task is open yet. Start one in the main window first.',
+  quickInputUnavailable: 'DeepSeek Harness is still starting. Try again in a moment.',
+  quickInputRejected: 'The task cannot accept this message right now.',
 } as const
 
 /** Every Desktop locale supplies the complete English key set. */
@@ -283,6 +291,14 @@ export const zh = {
   mandatoryCopyFailed: '复制失败，请手动选择并复制下方链接。',
   mandatoryAddress: '下载链接',
   mandatoryNotification: '返回应用确认安装并重启。',
+  quickInputMenu: '快捷输入',
+  quickInputTitle: '快捷输入',
+  quickInputPlaceholder: '给当前任务发送消息…',
+  quickInputSend: '发送',
+  quickInputEmpty: '请先输入内容',
+  quickInputNoSession: '还没有打开的任务，请先在主窗口开始一个任务',
+  quickInputUnavailable: 'DeepSeek Harness 正在启动，请稍后再试',
+  quickInputRejected: '任务当前无法接收这条消息',
 } as const satisfies DesktopMessages
 
 /** Locale payload exposed to the Desktop-owned renderer. */

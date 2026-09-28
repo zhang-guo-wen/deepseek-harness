@@ -49,7 +49,7 @@ function browserEnvironment() {
 }
 
 describe.skipIf(!existsSync(preload('preload-app')))('built sandboxed Desktop preloads', () => {
-  it.each(['preload-app', 'preload-welcome'])('%s loads without filesystem module access', (name) => {
+  it.each(['preload-app', 'preload-welcome', 'preload-quick-input'])('%s loads without filesystem module access', (name) => {
     const exposed = new Map<string, Record<string, unknown>>()
     const invoke = vi.fn(() => Promise.resolve({ languages: ['en-US'], preference: 'zh' }))
     const send = vi.fn()
@@ -58,13 +58,14 @@ describe.skipIf(!existsSync(preload('preload-app')))('built sandboxed Desktop pr
       contextBridge: { exposeInMainWorld: (key: string, value: Record<string, unknown>) => { exposed.set(key, value) } },
       ipcRenderer: { invoke, send, on: vi.fn(), off: vi.fn() },
     }
+    const localeArgument = name === 'preload-quick-input' ? '--dsh-quick-input-locale=en' : '--dsh-welcome-locale=en'
     runInNewContext(readFileSync(preload(name), 'utf8'), {
       ...browser.globals,
       require: (id: string) => {
         if (id !== 'electron') throw new Error(`sandbox cannot load ${id}`)
         return electron
       },
-      process: { argv: ['electron', '--dsh-welcome-locale=en'] },
+      process: { argv: ['electron', localeArgument] },
       location: new URL('dsh-app://app/'),
       exports: {},
     })
@@ -78,6 +79,15 @@ describe.skipIf(!existsSync(preload('preload-app')))('built sandboxed Desktop pr
       expect(invoke).toHaveBeenCalledWith('dsh-desktop:locale-bootstrap')
       bridge.onChange('zh')
       expect(send).toHaveBeenCalledWith('dsh-desktop:locale-changed', 'zh')
+    } else if (name === 'preload-quick-input') {
+      // The panel renderer receives copy and two actions, nothing else.
+      const bridge = exposed.get('dshQuickInput') as { id: string; messages: object; submit(text: string): Promise<unknown>; close(): Promise<void> }
+      expect(bridge.id).toBe('en')
+      expect(bridge.messages).toBeDefined()
+      void bridge.submit('hello')
+      expect(invoke).toHaveBeenCalledWith('dsh-quick-input:submit', 'hello')
+      void bridge.close()
+      expect(invoke).toHaveBeenCalledWith('dsh-quick-input:close')
     } else {
       expect(exposed.has('dshWelcome')).toBe(true)
       const bridge = exposed.get('dshWelcome') as { takeNotice(): Promise<unknown> }

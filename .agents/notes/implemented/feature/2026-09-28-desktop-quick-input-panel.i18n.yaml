@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for 2026-09-28-desktop-quick-input-panel.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-28-desktop-quick-input-panel.md
+/agent-note-desktop-quick-input-panel:
+  en: a4f3f1b3397ca9e6
+  zh: 28a5c7a32eebd6b8
+/agent-note-desktop-quick-input-panel/problem:
+  en: 8c558c98000c2fb7
+  zh: d90d747f7d35ef33
+/agent-note-desktop-quick-input-panel/decision:
+  en: b3f093b047da69c9
+  zh: 50b2f8f82b60619e
+/agent-note-desktop-quick-input-panel/alternatives-considered:
+  en: 9ee01a64b2598205
+  zh: 8a9b5f0c7f51b86a
+/agent-note-desktop-quick-input-panel/consequences:
+  en: 384e045695e78cf2
+  zh: 76e21e685b916f53
