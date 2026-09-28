@@ -14,6 +14,12 @@ packages:
   # closure is what the exe bundles and what the Python runtime distributes.
   - python/sdk-runtime
 
+# Third-party plugin packages reach the workspace through
+# `@deepseek-ai/dsh-desktop-extras`, and they declare `@deepseek-ai/dsh-*`
+# peers by version range. Linking the workspace copy satisfies those peers
+# with the installation's own packages instead of downloading a second copy.
+linkWorkspacePackages: true
+
 overrides:
   'extract-zip>yauzl': '3.4.0'
   '@deepseek-ai/cosmokit': 'link:vendor/cosmokit'
@@ -94,6 +100,12 @@ minimumReleaseAgeExclude:
   - '@trycua/cua-driver-win32-arm64-msvc@0.28.0'
   - '@trycua/cua-driver-win32-x64-msvc@0.28.0'
   - '@trycua/cua-driver@0.28.0'
+  - '@guowenzhang/dsh-claude-compat@1.0.0'
+  - '@guowenzhang/dsh-mcp-manager@1.0.0'
+  - '@guowenzhang/dsh-memory@1.0.0'
+  - '@guowenzhang/dsh-ui-beautify@1.0.0'
+  - '@guowenzhang/dsh-web-design@1.0.0'
+  - '@guowenzhang/dsh-worktree@1.0.0'
 patchedDependencies:
   '@earendil-works/pi-ai@0.85.1': patches/@earendil-works__pi-ai@0.85.1.patch
   '@electron/osx-sign@1.3.3': patches/@electron__osx-sign@1.3.3.patch

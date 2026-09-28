@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Desktop extras">
+  <rect x="4" y="10" width="56" height="38" rx="5" fill="#2b6cb0"/>
+  <rect x="10" y="16" width="44" height="26" rx="2" fill="#e6f0fb"/>
+  <path d="M20 54h24" stroke="#2b6cb0" stroke-width="4" stroke-linecap="round"/>
+  <path d="M32 48v6" stroke="#2b6cb0" stroke-width="4" stroke-linecap="round"/>
+  <path d="M22 29l6 6 12-12" stroke="#2b6cb0" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>

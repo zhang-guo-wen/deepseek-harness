@@ -31,6 +31,11 @@ const DSH_PACKAGE = '@deepseek-ai/dsh'
 const CORE_BUILD_PACKAGE = '@deepseek-ai/dsh-subprocess-local'
 const WEB_PROFILE = PROFILE_TEMPLATES.web as ProfileTemplate
 const WORKSPACE_SETTINGS = 'nodeLinker: hoisted\nautoInstallPeers: false\n'
+/**
+ * Bundles a new desktop profile starts with: the shared Web layer plus the
+ * desktop application's third-party plugin layer, which the installation ships.
+ */
+const DESKTOP_PROFILE_BUNDLES: readonly string[] = [...WEB_PROFILE.bundles, '@deepseek-ai/dsh-desktop-extras']
 function writeJson(path: string, value: unknown): void {
   writeFileSync(path, `${JSON.stringify(value, undefined, 2)}\n`, { mode: 0o600 })
 }
@@ -172,5 +177,5 @@ export function createDevelopmentProjectMetadata(projectDir: string, release: De
 
 /** Create the first external plugin profile without running a package manager. */
 export function createPluginProfile(projectDir: string): void {
-  initProfile(projectDir, WEB_PROFILE.bundles)
+  initProfile(projectDir, DESKTOP_PROFILE_BUNDLES)
 }

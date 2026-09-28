@@ -88,6 +88,14 @@ const OVERRIDES: Record<string, { license?: string; repo?: string }> = {
   // No repository field in the published manifest.
   'node-addon-require-builtin': { repo: 'https://www.npmjs.com/package/node-addon-require-builtin' },
   // No `license` field in the published manifest; the tarball's LICENSE.txt is the MIT text.
+  // The desktop extras plugins publish MIT without a `repository` field, so
+  // each entry points at its published package page.
+  '@guowenzhang/dsh-claude-compat': { repo: 'https://www.npmjs.com/package/@guowenzhang/dsh-claude-compat' },
+  '@guowenzhang/dsh-mcp-manager': { repo: 'https://www.npmjs.com/package/@guowenzhang/dsh-mcp-manager' },
+  '@guowenzhang/dsh-memory': { repo: 'https://www.npmjs.com/package/@guowenzhang/dsh-memory' },
+  '@guowenzhang/dsh-ui-beautify': { repo: 'https://www.npmjs.com/package/@guowenzhang/dsh-ui-beautify' },
+  '@guowenzhang/dsh-web-design': { repo: 'https://www.npmjs.com/package/@guowenzhang/dsh-web-design' },
+  '@guowenzhang/dsh-worktree': { repo: 'https://www.npmjs.com/package/@guowenzhang/dsh-worktree' },
 }
 
 /**

@@ -1,0 +1,13 @@
+- insert:
+    - id: claude-compat
+      name: '@guowenzhang/dsh-claude-compat'
+    - id: mcp-manager
+      name: '@guowenzhang/dsh-mcp-manager'
+    - id: memory
+      name: '@guowenzhang/dsh-memory'
+    - id: ui-beautify
+      name: '@guowenzhang/dsh-ui-beautify'
+    - id: web-design
+      name: '@guowenzhang/dsh-web-design'
+    - id: worktree
+      name: '@guowenzhang/dsh-worktree'
